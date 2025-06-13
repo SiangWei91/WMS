@@ -1,13 +1,12 @@
-
 let currentPage = 1;
-const rowsPerPage = 10;
+const rowsPerPage = 10; // This might be used for client-side pagination or if Firestore pagination is implemented
 
 async function loadProducts() {
     const content = document.getElementById('content');
     content.innerHTML = `
         <div class="products">
             <div class="page-header">
-                <h1>Product Management</h1>
+                <h1>Product List</h1>
                 <div class="actions">
                     <div class="search-box">
                         <i class="fas fa-search"></i>
@@ -48,33 +47,19 @@ async function loadProducts() {
 async function fetchProducts(searchTerm = '') {
     try {
         const params = {
-            page: currentPage,
+            page: currentPage, // TODO: Implement actual pagination with Firestore (limit, startAfter)
             limit: rowsPerPage,
-            productCode: searchTerm
+            searchTerm: searchTerm // TODO: Implement search with Firestore (e.g., using where clauses if searching by specific fields)
         };
         
-        const response = await fetch(`${API_BASE_URL}/getProducts?${new URLSearchParams(params)}`, {
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
+        // Now calls the Firestore productAPI from window object
+        const response = await window.productAPI.getProducts(params); 
         
-        // 检查响应内容类型
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            const text = await response.text();
-            throw new Error(`预期JSON响应，但收到: ${text.substring(0, 100)}...`);
-        }
-        
-        const data = await response.json();
-        
-        if (!response.ok) throw new Error(data.message || '获取产品失败');
-        
-        renderProductsTable(data.data);
-        renderPagination(data.pagination);
+        renderProductsTable(response.data);
+        renderPagination(response.pagination); // Pagination data from API might be simplified for now
     } catch (error) {
-        console.error('获取产品列表失败:', error);
-        alert('获取产品列表失败: ' + error.message);
+        console.error('获取产品列表失败 (Firestore):', error);
+        alert('获取产品列表失败: ' + error.message); // User-friendly message
     }
 }
 
@@ -93,11 +78,21 @@ function renderProductsTable(products) {
 
     products.forEach(product => {
         const row = document.createElement('tr');
+        // Ensure product.id is used for data-id, which comes from Firestore document ID
+        // Handle Firestore Timestamps for createdAt
+        let createdAtDisplay = 'N/A';
+        if (product.createdAt && product.createdAt.toDate) {
+            createdAtDisplay = product.createdAt.toDate().toLocaleString();
+        } else if (product.createdAt) {
+            // Fallback if it's already a string or number (less likely with serverTimestamp)
+            createdAtDisplay = new Date(product.createdAt).toLocaleString();
+        }
+
         row.innerHTML = `
             <td>${product.productCode || ''}</td>
             <td>${product.name || ''}</td>
             <td>${product.packaging || ''}</td>
-            <td>${product.createdAt ? new Date(product.createdAt).toLocaleString() : ''}</td>
+            <td>${createdAtDisplay}</td>
             <td class="actions">
                 <button class="btn-icon view-btn" data-id="${product.id}">
                     <i class="fas fa-eye"></i>
@@ -113,7 +108,7 @@ function renderProductsTable(products) {
         tbody.appendChild(row);
     });
 
-    // 添加按钮事件监听器
+    // Re-attach event listeners after rendering table
     document.querySelectorAll('.view-btn').forEach(btn => {
         btn.addEventListener('click', (e) => viewProduct(e.target.closest('button').dataset.id));
     });
@@ -126,13 +121,16 @@ function renderProductsTable(products) {
         btn.addEventListener('click', (e) => deleteProduct(e.target.closest('button').dataset.id));
     });
 }
+
 function renderPagination(pagination) {
     const paginationDiv = document.getElementById('pagination');
     paginationDiv.innerHTML = '';
 
-    const { page, totalPages } = pagination;
+    // Note: Firestore pagination is different. This is a simplified version.
+    // Actual Firestore pagination would involve query cursors (startAfter, endBefore).
+    // For now, assuming pagination object provides page and totalPages.
+    const { page = 1, totalPages = 1 } = pagination || {};
 
-    // 上一页按钮
     const prevBtn = document.createElement('button');
     prevBtn.className = 'btn-pagination';
     prevBtn.disabled = page === 1;
@@ -140,24 +138,22 @@ function renderPagination(pagination) {
     prevBtn.addEventListener('click', () => {
         if (page > 1) {
             currentPage = page - 1;
-            fetchProducts();
+            fetchProducts(document.getElementById('product-search').value.trim());
         }
     });
     paginationDiv.appendChild(prevBtn);
 
-    // 页码按钮
     for (let i = 1; i <= totalPages; i++) {
         const pageBtn = document.createElement('button');
         pageBtn.className = `btn-pagination ${i === page ? 'active' : ''}`;
         pageBtn.textContent = i;
         pageBtn.addEventListener('click', () => {
             currentPage = i;
-            fetchProducts();
+            fetchProducts(document.getElementById('product-search').value.trim());
         });
         paginationDiv.appendChild(pageBtn);
     }
 
-    // 下一页按钮
     const nextBtn = document.createElement('button');
     nextBtn.className = 'btn-pagination';
     nextBtn.disabled = page === totalPages;
@@ -165,7 +161,7 @@ function renderPagination(pagination) {
     nextBtn.addEventListener('click', () => {
         if (page < totalPages) {
             currentPage = page + 1;
-            fetchProducts();
+            fetchProducts(document.getElementById('product-search').value.trim());
         }
     });
     paginationDiv.appendChild(nextBtn);
@@ -173,12 +169,13 @@ function renderPagination(pagination) {
 
 function handleProductSearch(e) {
     const searchTerm = e.target.value.trim();
-    currentPage = 1;
+    currentPage = 1; // Reset to first page on new search
     fetchProducts(searchTerm);
 }
 
 function loadAddProductForm() {
     const content = document.getElementById('content');
+    // This form structure is fine.
     content.innerHTML = `
         <div class="form-container">
             <h1>Add Product</h1>
@@ -210,61 +207,82 @@ function loadAddProductForm() {
 
 async function handleAddProduct(e) {
     e.preventDefault();
-    
     const form = e.target;
     const formData = new FormData(form);
-    
     const productData = {
         productCode: formData.get('productCode'),
         name: formData.get('name'),
         packaging: formData.get('packaging')
+        // createdAt will be handled by Firestore serverTimestamp in productAPI.addProduct
     };
     
     try {
-        const response = await fetch(`${API_BASE_URL}/addProduct`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                // 如果需要认证
-                // 'Authorization': 'Bearer ' + getAuthToken()
-            },
-            body: JSON.stringify(productData)
-        });
-
-        // 检查响应内容类型
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            const text = await response.text();
-            console.error('服务器返回非JSON响应:', text);
-            throw new Error(`服务器响应异常: ${text.substring(0, 100)}...`);
-        }
-
-        const result = await response.json();
-        
-        if (response.ok) {
-            alert('产品添加成功!');
-            loadProducts();
-        } else {
-            throw new Error(result.message || '添加产品失败');
-        }
+        // Now calls the Firestore productAPI from window object
+        await window.productAPI.addProduct(productData);
+        alert('产品添加成功!');
+        loadProducts(); // Reload products list
     } catch (error) {
-        console.error('添加产品失败:', error);
+        console.error('添加产品失败 (Firestore):', error);
         alert('添加产品失败: ' + error.message);
     }
 }
-function viewProduct(productId) {
-    // 实现查看产品详情逻辑
-    console.log('查看产品:', productId);
-}
 
-function editProduct(productId) {
-    // 实现编辑产品逻辑
-    console.log('编辑产品:', productId);
-}
-
-function deleteProduct(productId) {
-    // 实现删除产品逻辑
-    if (confirm('确定要删除这个产品吗？')) {
-        console.log('删除产品:', productId);
+async function viewProduct(productId) {
+    try {
+        console.log('查看产品 (Firestore):', productId);
+        const product = await window.productAPI.getProductById(productId);
+        if (product) {
+            let createdAtString = 'N/A';
+            if (product.createdAt && product.createdAt.toDate) {
+                createdAtString = product.createdAt.toDate().toLocaleString();
+            } else if (product.createdAt) {
+                createdAtString = new Date(product.createdAt).toLocaleString();
+            }
+            // Simple alert for now. A modal or dedicated view area would be better.
+            alert(`产品详情:\nID: ${product.id}\n代码: ${product.productCode}\n名称: ${product.name}\n包装: ${product.packaging}\n创建时间: ${createdAtString}`);
+        } else {
+            alert('未找到产品');
+        }
+    } catch (error) {
+        console.error('查看产品失败 (Firestore):', error);
+        alert('查看产品失败: ' + error.message);
     }
-} 
+}
+
+async function editProduct(productId) {
+    // This is a simplified version for the subtask.
+    // A full implementation would load a form pre-filled with product data.
+    try {
+        console.log('编辑产品 (Firestore):', productId);
+        const product = await window.productAPI.getProductById(productId);
+        if (product) {
+            console.log('Product data for editing:', product);
+            // For now, just an alert. TODO: Implement a form for editing.
+            alert(`编辑产品 (详细信息见控制台, ID: ${product.id}). 完整编辑功能需表单.`);
+            // Example of what might follow:
+            // loadEditProductForm(product); 
+            // function loadEditProductForm(product) {
+            //   // ... similar to loadAddProductForm, but pre-fill fields
+            //   // ... and the submit handler would call window.productAPI.updateProduct()
+            // }
+        } else {
+            alert('未找到要编辑的产品');
+        }
+    } catch (error) {
+        console.error('编辑产品失败 (获取数据) (Firestore):', error);
+        alert('编辑产品失败 (获取数据): ' + error.message);
+    }
+}
+
+async function deleteProduct(productId) {
+    if (confirm(`确定要删除这个产品 (ID: ${productId}) 吗？`)) {
+        try {
+            await window.productAPI.deleteProduct(productId);
+            alert('产品删除成功!');
+            loadProducts(); // Refresh the products list
+        } catch (error) {
+            console.error('删除产品失败 (Firestore):', error);
+            alert('删除产品失败: ' + error.message);
+        }
+    }
+}
