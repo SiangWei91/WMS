@@ -1,23 +1,4 @@
-// API基础配置 (Old - Commented out)
-// const API_BASE_URL = 'https://us-central1-inventory-management-sys-b3678.cloudfunctions.net';
 
-// 通用请求函数 (Old - Commented out)
-// async function makeRequest(method, endpoint, data = null) { ... }
-
-// 产品API (Old - Commented out)
-/*
-export const productAPI = {
-    getProducts: (params) => {
-        const queryString = new URLSearchParams(params).toString();
-        return makeRequest('GET', `/getProducts?${queryString}`);
-    },
-    addProduct: (data) => makeRequest('POST', '/addProduct', data),
-};
-*/
-
-// Ensure window.db is defined in firebase-init.js as:
-// const app = firebase.initializeApp(firebaseConfig);
-// window.db = firebase.firestore(); // Corrected initialization for compat SDK
 
 const productAPI_firestore = {
     async getProducts(params = {}) { // params currently not fully used for query conditions, can be added
