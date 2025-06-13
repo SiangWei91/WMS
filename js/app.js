@@ -39,7 +39,7 @@ function loadPage(page) {
       loadInventory();
       break;
     case 'transactions':
-      loadTransactions();
+      loadTransactions(); // This function is not yet defined in the provided files
       break;
     case 'inbound':
       loadInboundForm();
@@ -57,26 +57,26 @@ async function loadDashboard() {
   const content = document.getElementById('content');
   content.innerHTML = `
       <div class="dashboard">
-          <h1>欢迎使用库存管理系统</h1>
+          <h1>Welcome to Li Chuan Inventory Management System</h1>
           <div class="stats">
               <div class="stat-card">
                   <i class="fas fa-boxes"></i>
                   <div>
-                      <h3>总产品数</h3>
+                      <h3>Total Product</h3>
                       <p id="total-products">0</p>
                   </div>
               </div>
               <div class="stat-card">
                   <i class="fas fa-warehouse"></i>
                   <div>
-                      <h3>总库存量</h3>
+                      <h3>Total Quantity</h3>
                       <p id="total-inventory">0</p>
                   </div>
               </div>
               <div class="stat-card">
                   <i class="fas fa-exchange-alt"></i>
                   <div>
-                      <h3>今日交易</h3>
+                      <h3>Transaction</h3>
                       <p id="today-transactions">0</p>
                   </div>
               </div>
@@ -85,7 +85,8 @@ async function loadDashboard() {
   `;
 
   try {
-    const stats = await dashboardAPI.getStats();
+    // Assuming dashboardAPI is globally available (from api.js)
+    const stats = await window.dashboardAPI.getStats();
     document.getElementById('total-products').textContent = stats.totalProducts;
     document.getElementById('total-inventory').textContent =
       stats.totalInventory;
@@ -93,6 +94,7 @@ async function loadDashboard() {
       stats.todayTransactions;
   } catch (error) {
     console.error('加载仪表盘数据失败:', error);
+    // Optionally display a user-friendly error message in the UI
   }
 }
 
@@ -101,43 +103,42 @@ function loadInboundForm() {
   const content = document.getElementById('content');
   content.innerHTML = `
       <div class="form-container">
-          <h1>产品入库</h1>
+          <h1>Inbound</h1>
           <form id="inbound-form">
               <div class="form-group">
-                  <label for="inbound-productCode">产品代码*</label>
+                  <label for="inbound-productCode"Item Code*</label>
                   <input type="text" id="inbound-productCode" name="productCode" required>
               </div>
               <div class="form-group">
-                  <label for="inbound-warehouseId">仓库ID*</label>
+                  <label for="inbound-warehouseId">Warehouse ID*</label>
                   <input type="text" id="inbound-warehouseId" name="warehouseId" value="WH01" required>
               </div>
               <div class="form-row">
                   <div class="form-group">
-                      <label for="inbound-batchNo">批次号</label>
+                      <label for="inbound-batchNo">Batch No</label>
                       <input type="text" id="inbound-batchNo" name="batchNo">
                   </div>
                   <div class="form-group">
-                      <label for="inbound-expiryDate">过期日期</label>
+                      <label for="inbound-expiryDate">Exp Date</label>
                       <input type="date" id="inbound-expiryDate" name="expiryDate">
                   </div>
               </div>
               <div class="form-group">
-                  <label for="inbound-quantity">数量*</label>
+                  <label for="inbound-quantity">Quantity*</label>
                   <input type="number" id="inbound-quantity" name="quantity" min="1" required>
               </div>
               <div class="form-group">
-                  <label for="inbound-operatorId">操作员ID*</label>
+                  <label for="inbound-operatorId">User ID*</label>
                   <input type="text" id="inbound-operatorId" name="operatorId" required>
               </div>
               <div class="form-actions">
-                  <button type="button" class="btn btn-secondary" id="inbound-cancel-btn">取消</button>
-                  <button type="submit" class="btn btn-primary">提交</button>
+                  <button type="button" class="btn btn-secondary" id="inbound-cancel-btn">Cancel</button>
+                  <button type="submit" class="btn btn-primary">Submit</button>
               </div>
           </form>
       </div>
   `;
 
-  // 添加事件监听器
   document
     .getElementById('inbound-cancel-btn')
     .addEventListener('click', () => loadPage('inventory'));
@@ -148,18 +149,49 @@ function loadInboundForm() {
 
 async function handleInboundSubmit(e) {
   e.preventDefault();
-
   const form = e.target;
   const formData = new FormData(form);
-  const inboundData = Object.fromEntries(formData.entries());
+  const rawData = Object.fromEntries(formData.entries());
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  submitButton.textContent = 'Submitting...';
 
   try {
-    await transactionAPI.inboundStock(inboundData);
-    alert('入库成功!');
+    const product = await window.productAPI.getProductByCode(
+      rawData.productCode
+    );
+    if (!product) {
+      alert(
+        `Product with code "${rawData.productCode}" not found. Please check the code or add the product first.`
+      );
+      submitButton.disabled = false;
+      submitButton.textContent = 'Submit';
+      return;
+    }
+
+    const inboundData = {
+      productId: product.id,
+      productCode: product.productCode,
+      productName: product.name,
+      warehouseId: rawData.warehouseId,
+      batchNo: rawData.batchNo,
+      expiryDate: rawData.expiryDate || null,
+      quantity: Number(rawData.quantity),
+      operatorId: rawData.operatorId,
+    };
+
+    await window.transactionAPI.inboundStock(inboundData);
+    alert('Inbound successful!');
     loadPage('inventory');
   } catch (error) {
-    console.error('入库失败:', error);
-    alert('入库失败: ' + error.message);
+    console.error('Inbound failed:', error);
+    alert('Inbound failed: ' + error.message);
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = 'Submit';
+    }
   }
 }
 
@@ -168,37 +200,36 @@ function loadOutboundForm() {
   const content = document.getElementById('content');
   content.innerHTML = `
       <div class="form-container">
-          <h1>产品出库</h1>
+          <h1>Out Bound</h1>
           <form id="outbound-form">
               <div class="form-group">
-                  <label for="outbound-productCode">产品代码*</label>
+                  <label for="outbound-productCode">Item Code*</label>
                   <input type="text" id="outbound-productCode" name="productCode" required>
               </div>
               <div class="form-group">
-                  <label for="outbound-warehouseId">仓库ID*</label>
+                  <label for="outbound-warehouseId">Warehouse ID*</label>
                   <input type="text" id="outbound-warehouseId" name="warehouseId" value="WH01" required>
               </div>
               <div class="form-group">
-                  <label for="outbound-batchNo">批次号</label>
+                  <label for="outbound-batchNo">Batch No</label>
                   <input type="text" id="outbound-batchNo" name="batchNo">
               </div>
               <div class="form-group">
-                  <label for="outbound-quantity">数量*</label>
+                  <label for="outbound-quantity">Quantity*</label>
                   <input type="number" id="outbound-quantity" name="quantity" min="1" required>
               </div>
               <div class="form-group">
-                  <label for="outbound-operatorId">操作员ID*</label>
+                  <label for="outbound-operatorId">User ID*</label>
                   <input type="text" id="outbound-operatorId" name="operatorId" required>
               </div>
               <div class="form-actions">
-                  <button type="button" class="btn btn-secondary" id="outbound-cancel-btn">取消</button>
-                  <button type="submit" class="btn btn-primary">提交</button>
+                  <button type="button" class="btn btn-secondary" id="outbound-cancel-btn">Cancel</button>
+                  <button type="submit" class="btn btn-primary">Submit</button>
               </div>
           </form>
       </div>
   `;
 
-  // 添加事件监听器
   document
     .getElementById('outbound-cancel-btn')
     .addEventListener('click', () => loadPage('inventory'));
@@ -209,17 +240,53 @@ function loadOutboundForm() {
 
 async function handleOutboundSubmit(e) {
   e.preventDefault();
-
   const form = e.target;
   const formData = new FormData(form);
-  const outboundData = Object.fromEntries(formData.entries());
+  const rawData = Object.fromEntries(formData.entries());
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  submitButton.textContent = 'Submitting...';
 
   try {
-    await transactionAPI.outboundStock(outboundData);
-    alert('出库成功!');
+    const product = await window.productAPI.getProductByCode(
+      rawData.productCode
+    );
+    if (!product) {
+      alert(`Product with code "${rawData.productCode}" not found.`);
+      submitButton.disabled = false;
+      submitButton.textContent = 'Submit';
+      return;
+    }
+
+    const outboundData = {
+      productId: product.id,
+      productCode: product.productCode,
+      productName: product.name,
+      warehouseId: rawData.warehouseId,
+      batchNo: rawData.batchNo,
+      quantity: Number(rawData.quantity),
+      operatorId: rawData.operatorId,
+    };
+
+    await window.transactionAPI.outboundStock(outboundData);
+    alert('Outbound successful!');
     loadPage('inventory');
   } catch (error) {
-    console.error('出库失败:', error);
-    alert('出库失败: ' + error.message);
+    console.error('Outbound failed:', error);
+    alert('Outbound failed: ' + error.message);
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = 'Submit';
+    }
   }
+}
+
+if (typeof loadTransactions === 'undefined') {
+  window.loadTransactions = function () {
+    console.warn('loadTransactions function is not defined yet.');
+    document.getElementById('content').innerHTML =
+      '<h1>Transactions (Not Implemented)</h1>';
+  };
 }
