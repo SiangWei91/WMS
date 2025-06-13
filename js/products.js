@@ -1,4 +1,4 @@
-// 产品管理逻辑
+
 let currentPage = 1;
 const rowsPerPage = 10;
 
@@ -7,14 +7,14 @@ async function loadProducts() {
     content.innerHTML = `
         <div class="products">
             <div class="page-header">
-                <h1>产品管理</h1>
+                <h1>Product Management</h1>
                 <div class="actions">
                     <div class="search-box">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="product-search" placeholder="搜索产品...">
+                        <input type="text" id="product-search" placeholder="Search Product...">
                     </div>
                     <button id="add-product-btn" class="btn btn-primary">
-                        <i class="fas fa-plus"></i> 添加产品
+                        <i class="fas fa-plus"></i> Add Product
                     </button>
                 </div>
             </div>
@@ -22,11 +22,11 @@ async function loadProducts() {
                 <table>
                     <thead>
                         <tr>
-                            <th>产品代码</th>
-                            <th>产品名称</th>
-                            <th>类别</th>
-                            <th>单位</th>
-                            <th>操作</th>
+                            <th>Item Code</th>
+                            <th>Product Description</th>
+                            <th>Packing Size</th>
+                            <th>Create Time</th>
+                            <th>Action</th>
                         </tr>
                     </thead>
                     <tbody id="products-table-body">
@@ -40,11 +40,8 @@ async function loadProducts() {
         </div>
     `;
 
-    // 添加事件监听器
     document.getElementById('add-product-btn').addEventListener('click', loadAddProductForm);
     document.getElementById('product-search').addEventListener('input', handleProductSearch);
-
-    // 加载产品数据
     await fetchProducts();
 }
 
@@ -56,9 +53,25 @@ async function fetchProducts(searchTerm = '') {
             productCode: searchTerm
         };
         
-        const response = await productAPI.getProducts(params);
-        renderProductsTable(response.data);
-        renderPagination(response.pagination);
+        const response = await fetch(`${API_BASE_URL}/getProducts?${new URLSearchParams(params)}`, {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        // 检查响应内容类型
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            throw new Error(`预期JSON响应，但收到: ${text.substring(0, 100)}...`);
+        }
+        
+        const data = await response.json();
+        
+        if (!response.ok) throw new Error(data.message || '获取产品失败');
+        
+        renderProductsTable(data.data);
+        renderPagination(data.pagination);
     } catch (error) {
         console.error('获取产品列表失败:', error);
         alert('获取产品列表失败: ' + error.message);
@@ -69,7 +82,7 @@ function renderProductsTable(products) {
     const tbody = document.getElementById('products-table-body');
     tbody.innerHTML = '';
 
-    if (products.length === 0) {
+    if (!products || products.length === 0) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="5" class="no-data">没有找到产品</td>
@@ -81,10 +94,10 @@ function renderProductsTable(products) {
     products.forEach(product => {
         const row = document.createElement('tr');
         row.innerHTML = `
-            <td>${product.productCode}</td>
-            <td>${product.productName}</td>
-            <td>${product.category}</td>
-            <td>${product.unit}</td>
+            <td>${product.productCode || ''}</td>
+            <td>${product.name || ''}</td>
+            <td>${product.packaging || ''}</td>
+            <td>${product.createdAt ? new Date(product.createdAt).toLocaleString() : ''}</td>
             <td class="actions">
                 <button class="btn-icon view-btn" data-id="${product.id}">
                     <i class="fas fa-eye"></i>
@@ -113,7 +126,6 @@ function renderProductsTable(products) {
         btn.addEventListener('click', (e) => deleteProduct(e.target.closest('button').dataset.id));
     });
 }
-
 function renderPagination(pagination) {
     const paginationDiv = document.getElementById('pagination');
     paginationDiv.innerHTML = '';
@@ -169,54 +181,29 @@ function loadAddProductForm() {
     const content = document.getElementById('content');
     content.innerHTML = `
         <div class="form-container">
-            <h1>添加新产品</h1>
+            <h1>Add Product</h1>
             <form id="product-form">
                 <div class="form-group">
-                    <label for="productCode">产品代码*</label>
+                    <label for="productCode">Item Code*</label>
                     <input type="text" id="productCode" name="productCode" required>
                 </div>
                 <div class="form-group">
-                    <label for="productName">产品名称*</label>
-                    <input type="text" id="productName" name="productName" required>
+                    <label for="name">Product Description*</label>
+                    <input type="text" id="name" name="name" required>
                 </div>
                 <div class="form-group">
-                    <label for="description">产品描述</label>
-                    <textarea id="description" name="description" rows="3"></textarea>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="category">类别*</label>
-                        <select id="category" name="category" required>
-                            <option value="">请选择...</option>
-                            <option value="电子产品">电子产品</option>
-                            <option value="办公用品">办公用品</option>
-                            <option value="家居用品">家居用品</option>
-                            <option value="食品饮料">食品饮料</option>
-                            <option value="服装鞋帽">服装鞋帽</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="unit">单位*</label>
-                        <select id="unit" name="unit" required>
-                            <option value="">请选择...</option>
-                            <option value="个">个</option>
-                            <option value="件">件</option>
-                            <option value="箱">箱</option>
-                            <option value="包">包</option>
-                            <option value="千克">千克</option>
-                            <option value="升">升</option>
-                        </select>
-                    </div>
+                    <label for="packaging">Packing Size*</label>
+                    <input type="text" id="packaging" name="packaging" required 
+                           placeholder="Example: 250g x 40p">
                 </div>
                 <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" id="cancel-btn">取消</button>
-                    <button type="submit" class="btn btn-primary">保存</button>
+                    <button type="button" class="btn btn-secondary" id="cancel-btn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
                 </div>
             </form>
         </div>
     `;
 
-    // 添加事件监听器
     document.getElementById('cancel-btn').addEventListener('click', loadProducts);
     document.getElementById('product-form').addEventListener('submit', handleAddProduct);
 }
@@ -226,24 +213,45 @@ async function handleAddProduct(e) {
     
     const form = e.target;
     const formData = new FormData(form);
-    const productData = Object.fromEntries(formData.entries());
     
-    // 添加额外字段
-    productData.warehouseId = 'WH01';
-    productData.initialQuantity = 0;
-    productData.minStockLevel = 0;
-    productData.maxStockLevel = 1000;
+    const productData = {
+        productCode: formData.get('productCode'),
+        name: formData.get('name'),
+        packaging: formData.get('packaging')
+    };
     
     try {
-        await productAPI.addProduct(productData);
-        alert('产品添加成功!');
-        loadProducts();
+        const response = await fetch(`${API_BASE_URL}/addProduct`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                // 如果需要认证
+                // 'Authorization': 'Bearer ' + getAuthToken()
+            },
+            body: JSON.stringify(productData)
+        });
+
+        // 检查响应内容类型
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            console.error('服务器返回非JSON响应:', text);
+            throw new Error(`服务器响应异常: ${text.substring(0, 100)}...`);
+        }
+
+        const result = await response.json();
+        
+        if (response.ok) {
+            alert('产品添加成功!');
+            loadProducts();
+        } else {
+            throw new Error(result.message || '添加产品失败');
+        }
     } catch (error) {
         console.error('添加产品失败:', error);
         alert('添加产品失败: ' + error.message);
     }
 }
-
 function viewProduct(productId) {
     // 实现查看产品详情逻辑
     console.log('查看产品:', productId);
@@ -259,4 +267,4 @@ function deleteProduct(productId) {
     if (confirm('确定要删除这个产品吗？')) {
         console.log('删除产品:', productId);
     }
-}
+} 
