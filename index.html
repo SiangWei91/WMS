@@ -1,102 +1,111 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>库存管理系统</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="css/style.css">
-</head>
-<body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Inventory Management System</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+    />
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
     <div class="app-container">
-        <!-- 侧边栏导航 -->
-        <aside class="sidebar">
-            <div class="logo">
+      <!-- 侧边栏导航 -->
+      <aside class="sidebar">
+        <div class="logo">
+          <i class="fas fa-boxes"></i>
+          <span>Inventory Management</span>
+        </div>
+        <nav>
+          <ul>
+            <li class="active" data-page="dashboard">
+              <i class="fas fa-tachometer-alt"></i>
+              <span>Dashboard</span>
+            </li>
+            <li data-page="products">
+              <i class="fas fa-box-open"></i>
+              <span>Product</span>
+            </li>
+            <li data-page="inventory">
+              <i class="fas fa-warehouse"></i>
+              <span>Inventory</span>
+            </li>
+            <li data-page="transactions">
+              <i class="fas fa-exchange-alt"></i>
+              <span>Transaction</span>
+            </li>
+            <li data-page="inbound">
+              <i class="fas fa-arrow-down"></i>
+              <span>Inbound</span>
+            </li>
+            <li data-page="outbound">
+              <i class="fas fa-arrow-up"></i>
+              <span>Outbound</span>
+            </li>
+          </ul>
+        </nav>
+      </aside>
+
+      <!-- 主内容区 -->
+      <main class="main-content">
+        <header class="header">
+          <div class="search-bar">
+            <i class="fas fa-search"></i>
+            <input type="text" placeholder="Search..." />
+          </div>
+          <div class="user-info">
+            <span>Admin</span>
+            <div class="avatar">
+              <i class="fas fa-user-circle"></i>
+            </div>
+          </div>
+        </header>
+
+        <!-- 页面内容动态加载到这里 -->
+        <div class="content" id="content">
+          <!-- 默认显示仪表盘 -->
+          <div class="dashboard">
+            <h1>Inventory Management System</h1>
+            <div class="stats">
+              <div class="stat-card">
                 <i class="fas fa-boxes"></i>
-                <span>Inventory Management</span>
+                <div>
+                  <h3>TotalProduct</h3>
+                  <p id="total-products">0</p>
+                </div>
+              </div>
+              <div class="stat-card">
+                <i class="fas fa-warehouse"></i>
+                <div>
+                  <h3>Total Stock</h3>
+                  <p id="total-inventory">0</p>
+                </div>
+              </div>
+              <div class="stat-card">
+                <i class="fas fa-exchange-alt"></i>
+                <div>
+                  <h3>Transaction</h3>
+                  <p id="today-transactions">0</p>
+                </div>
+              </div>
             </div>
-            <nav>
-                <ul>
-                    <li class="active" data-page="dashboard">
-                        <i class="fas fa-tachometer-alt"></i>
-                        <span>Dashboard</span>
-                    </li>
-                    <li data-page="products">
-                        <i class="fas fa-box-open"></i>
-                        <span>Product</span>
-                    </li>
-                    <li data-page="inventory">
-                        <i class="fas fa-warehouse"></i>
-                        <span>Inventory</span>
-                    </li>
-                    <li data-page="transactions">
-                        <i class="fas fa-exchange-alt"></i>
-                        <span>Transaction</span>
-                    </li>
-                    <li data-page="inbound">
-                        <i class="fas fa-arrow-down"></i>
-                        <span>Inbound</span>
-                    </li>
-                    <li data-page="outbound">
-                        <i class="fas fa-arrow-up"></i>
-                        <span>Outbound</span>
-                    </li>
-                </ul>
-            </nav>
-        </aside>
-
-        <!-- 主内容区 -->
-        <main class="main-content">
-            <header class="header">
-                <div class="search-bar">
-                    <i class="fas fa-search"></i>
-                    <input type="text" placeholder="Search...">
-                </div>
-                <div class="user-info">
-                    <span>Admin</span>
-                    <div class="avatar">
-                        <i class="fas fa-user-circle"></i>
-                    </div>
-                </div>
-            </header>
-
-            <!-- 页面内容动态加载到这里 -->
-            <div class="content" id="content">
-                <!-- 默认显示仪表盘 -->
-                <div class="dashboard">
-                    <h1>Inventory Management System</h1>
-                    <div class="stats">
-                        <div class="stat-card">
-                            <i class="fas fa-boxes"></i>
-                            <div>
-                                <h3>TotalProduct</h3>
-                                <p id="total-products">0</p>
-                            </div>
-                        </div>
-                        <div class="stat-card">
-                            <i class="fas fa-warehouse"></i>
-                            <div>
-                                <h3>Total Stock</h3>
-                                <p id="total-inventory">0</p>
-                            </div>
-                        </div>
-                        <div class="stat-card">
-                            <i class="fas fa-exchange-alt"></i>
-                            <div>
-                                <h3>Transaction</h3>
-                                <p id="today-transactions">0</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
+          </div>
+        </div>
+      </main>
     </div>
+    <!-- Firebase App (Core) - Compatibility Version -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <!-- Firestore - Compatibility Version -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    <!-- Your Firebase Init Script -->
+    <script src="js/firebase-init.js"></script>
     <!-- 加载所有JavaScript文件 -->
     <script src="js/api.js"></script>
     <script src="js/products.js"></script>
     <script src="js/inventory.js"></script>
     <script src="js/transactions.js"></script>
     <script src="js/app.js"></script>
-</body>
+  </body>
 </html>
