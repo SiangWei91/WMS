@@ -1,5 +1,4 @@
 
-
 const productAPI_firestore = {
     async getProducts(params = {}) { // params currently not fully used for query conditions, can be added
         try {
