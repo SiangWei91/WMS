@@ -70,7 +70,14 @@ nav ul li i {
   flex: 1;
   display: flex;
   flex-direction: column;
+  margin-left: 0px; /* Default margin when sidebar is expanded */
+  transition: margin-left 0.3s;
 }
+
+.sidebar.sidebar-collapsed + .main-content {
+  margin-left: 0;
+}
+
 
 .header {
   height: 70px;
@@ -287,4 +294,324 @@ tr:hover {
   .stats {
     grid-template-columns: 1fr;
   }
+}
+/* Additional styles to add to your style.css */
+
+/* Page header styles */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.page-header h1 {
+  color: #2c3e50;
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  background-color: #f8f9fa;
+  padding: 8px 15px;
+  border-radius: 20px;
+}
+
+.search-box input {
+  border: none;
+  background: transparent;
+  outline: none;
+  margin-left: 10px;
+  width: 200px;
+}
+
+/* Button styles */
+.btn-icon {
+  padding: 8px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin: 0 2px;
+  transition: all 0.3s;
+}
+
+.btn-icon.view-btn {
+  background-color: #3498db;
+  color: white;
+}
+
+.btn-icon.edit-btn {
+  background-color: #f39c12;
+  color: white;
+}
+
+.btn-icon.delete-btn {
+  background-color: #e74c3c;
+  color: white;
+}
+
+.btn-icon:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Pagination styles */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 20px;
+  gap: 5px;
+}
+
+.btn-pagination {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  background-color: white;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.3s;
+}
+
+.btn-pagination:hover:not(:disabled) {
+  background-color: #3498db;
+  color: white;
+  border-color: #3498db;
+}
+
+.btn-pagination.active {
+  background-color: #3498db;
+  color: white;
+  border-color: #3498db;
+}
+
+.btn-pagination:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Badge styles */
+.badge {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.badge-success {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.badge-danger {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.badge-info {
+  background-color: #d1ecf1;
+  color: #0c5460;
+}
+
+.badge-secondary {
+  background-color: #e2e3e5;
+  color: #383d41;
+}
+
+/* Text colors */
+.text-success {
+  color: #28a745 !important;
+}
+
+.text-danger {
+  color: #dc3545 !important;
+}
+
+/* Table enhancements */
+.no-data {
+  text-align: center;
+  color: #6c757d;
+  font-style: italic;
+  padding: 40px !important;
+}
+
+.low-stock {
+  color: #e74c3c;
+  font-weight: bold;
+}
+
+/* Form enhancements */
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+/* Filters */
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  margin-bottom: 20px;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-group label {
+  font-weight: 500;
+  color: #2c3e50;
+  white-space: nowrap;
+}
+
+.filter-group select,
+.filter-group input {
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  outline: none;
+}
+
+.filter-group select:focus,
+.filter-group input:focus {
+  border-color: #3498db;
+}
+
+/* Loading overlay */
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+
+.loading-spinner {
+  width: 50px;
+  height: 50px;
+  border: 5px solid #f3f3f3;
+  border-top: 5px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Toast notifications */
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 15px 20px;
+  border-radius: 5px;
+  color: white;
+  z-index: 10000;
+  transform: translateX(100%);
+  transition: transform 0.3s;
+}
+
+.toast.show {
+  transform: translateX(0);
+}
+
+.toast.success {
+  background-color: #28a745;
+}
+
+.toast.error {
+  background-color: #dc3545;
+}
+
+.toast.info {
+  background-color: #17a2b8;
+}
+
+.sidebar.sidebar-collapsed {
+  width: 0;
+  overflow: hidden;
+}
+
+.sidebar.sidebar-collapsed .logo,
+.sidebar.sidebar-collapsed nav ul {
+  display: none;
+}
+
+
+.sidebar-toggle {
+  font-size: 1.5rem;
+  cursor: pointer;
+  margin-right: 20px;
+}
+
+/* Styles for Avatar Dropdown Menu */
+.avatar-menu-trigger {
+  position: relative; /* For positioning the dropdown relative to this */
+  cursor: pointer;
+  display: flex; /* Aligns avatar and potential future items nicely */
+  align-items: center;
+  margin-left: 15px; /* Space between username and avatar trigger */
+}
+
+.avatar-dropdown {
+  display: none; /* Hidden by default */
+  position: absolute;
+  top: 100%; /* Position below the avatar trigger */
+  right: 0; /* Align to the right of the trigger */
+  background-color: #ffffff;
+  min-width: 120px; /* Or any appropriate width */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  z-index: 1000; /* Ensure it's above other content */
+  padding: 8px 0; /* Padding for items inside */
+}
+
+.avatar-dropdown.show {
+  display: block; /* Class to show the dropdown */
+}
+
+.avatar-dropdown a {
+  display: block;
+  padding: 10px 15px;
+  text-decoration: none;
+  color: #333; /* Standard text color */
+  font-size: 0.9rem;
+}
+
+.avatar-dropdown a:hover {
+  background-color: #f5f5f5; /* Hover effect for dropdown items */
+}
+
+.company-name {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: #2c3e50;
+  display: flex;
+  align-items: center;
+  margin-left: 20px;
 }
