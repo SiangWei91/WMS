@@ -51,14 +51,19 @@
       <!-- 主内容区 -->
       <main class="main-content">
         <header class="header">
-          <div class="search-bar">
-            <i class="fas fa-search"></i>
-            <input type="text" placeholder="Search..." />
+          <div class="sidebar-toggle">
+            <i class="fas fa-bars"></i>
           </div>
+          <div class="company-name">LI CHUAN FOOD PRODUCTS PTE LTD</div>
           <div class="user-info">
-            <span>Admin</span>
-            <div class="avatar">
-              <i class="fas fa-user-circle"></i>
+            <span id="username-display">User</span> <!-- Username will be filled by JS -->
+            <div id="avatar-menu-trigger" class="avatar-menu-trigger">
+              <div class="avatar">
+                <i class="fas fa-user-circle"></i>
+              </div>
+              <div id="avatar-dropdown" class="avatar-dropdown">
+                <a href="#" id="dropdown-logout-button">Logout</a>
+              </div>
             </div>
           </div>
         </header>
@@ -99,6 +104,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <!-- Firestore - Compatibility Version -->
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
     <!-- Your Firebase Init Script -->
     <script src="js/firebase-init.js"></script>
     <!-- 加载所有JavaScript文件 -->
