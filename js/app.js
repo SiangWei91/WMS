@@ -1,3 +1,20 @@
+// HTML Templates for dynamic navigation items
+const NAV_ITEM_JORDON_HTML = `
+    <li data-page="jordon" id="nav-jordon" class="dynamic-nav-item">
+        <i class="fas fa-box"></i> 
+        <span>Jordon</span>
+    </li>`;
+const NAV_ITEM_LINEAGE_HTML = `
+    <li data-page="lineage" id="nav-lineage" class="dynamic-nav-item">
+        <i class="fas fa-box"></i> 
+        <span>Lineage</span>
+    </li>`;
+const NAV_ITEM_SINGLONG_HTML = `
+    <li data-page="singlong" id="nav-singlong" class="dynamic-nav-item">
+        <i class="fas fa-box"></i> 
+        <span>Sing Long</span>
+    </li>`;
+
 // 主应用逻辑
 document.addEventListener('DOMContentLoaded', function () {
   // Firebase Auth State Change Listener
@@ -93,46 +110,178 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 });
 
+function createNavItem(htmlString) {
+  const div = document.createElement('div');
+  div.innerHTML = htmlString.trim();
+  return div.firstChild;
+}
+
 // 初始化导航
 function initNavigation() {
-const navItems = document.querySelectorAll('.sidebar li');
+  const mainNavList = document.querySelector('.sidebar nav ul');
+  const publicWarehouseMenuItem = document.getElementById('public-warehouse-menu');
+  const publicWarehouseToggle = publicWarehouseMenuItem ? publicWarehouseMenuItem.querySelector('.public-warehouse-toggle') : null;
 
-navItems.forEach((item) => {
-  item.addEventListener('click', function () {
-    navItems.forEach((nav) => nav.classList.remove('active'));
-    this.classList.add('active');
-    const page = this.getAttribute('data-page');
-    loadPage(page); // Defined below
+  if (!mainNavList || !publicWarehouseMenuItem || !publicWarehouseToggle) {
+    console.error('Essential navigation elements not found.');
+    return;
+  }
+
+  const DYNAMIC_NAV_ITEM_IDS = ['nav-jordon', 'nav-lineage', 'nav-singlong'];
+
+  function removeDynamicNavItems() {
+    DYNAMIC_NAV_ITEM_IDS.forEach(id => {
+      const item = document.getElementById(id);
+      if (item) {
+        item.remove();
+      }
+    });
+    publicWarehouseMenuItem.classList.remove('expanded');
+  }
+
+  // Click listener for Public Warehouse Toggle
+  publicWarehouseToggle.addEventListener('click', function(event) {
+    event.stopPropagation();
+    const isCurrentlyExpanded = publicWarehouseMenuItem.classList.contains('expanded');
+
+    if (isCurrentlyExpanded) {
+      removeDynamicNavItems();
+    } else {
+      // Not expanded, so add items
+      publicWarehouseMenuItem.classList.add('expanded');
+      
+      // Create and insert items in reverse order of appearance for insertAdjacentElement('afterend')
+      // or use .after() with multiple elements if fully supported.
+      // Using insertAdjacentElement for broader compatibility and clarity.
+      const singlongItem = createNavItem(NAV_ITEM_SINGLONG_HTML);
+      const lineageItem = createNavItem(NAV_ITEM_LINEAGE_HTML);
+      const jordonItem = createNavItem(NAV_ITEM_JORDON_HTML);
+
+      // Insert after publicWarehouseMenuItem. If inserting multiple, consider order.
+      // publicWarehouseMenuItem.after(jordonItem, lineageItem, singlongItem); // Modern way
+      // Fallback for potentially broader compatibility:
+      let currentLastItem = publicWarehouseMenuItem;
+      [jordonItem, lineageItem, singlongItem].forEach(item => {
+          currentLastItem.insertAdjacentElement('afterend', item);
+          currentLastItem = item; // Next item will be inserted after this one
+      });
+    }
   });
-});
+
+  // Event Delegation for Page Loading on mainNavList
+  mainNavList.addEventListener('click', function(event) {
+    const targetLi = event.target.closest('li[data-page]');
+
+    // Ignore clicks not on a data-page LI, or clicks on the toggle div itself
+    if (!targetLi || (publicWarehouseToggle && publicWarehouseToggle.contains(event.target))) {
+      // If the click was on the toggle, it's handled by its own listener.
+      // If it was on publicWarehouseMenuItem but not the toggle, and PWMenuItem has no data-page, ignore.
+      if (targetLi === publicWarehouseMenuItem && !publicWarehouseMenuItem.hasAttribute('data-page')) {
+          return;
+      }
+      if(!targetLi) return; // truly not a data-page item
+    }
+    
+    const page = targetLi.getAttribute('data-page');
+    if (!page) return; // Should be redundant due to selector, but good practice
+
+    // Deactivate all LIs and remove 'expanded' from PW parent
+    mainNavList.querySelectorAll('li').forEach(li => {
+        li.classList.remove('active');
+        if (li.id === 'public-warehouse-menu') {
+            li.classList.remove('expanded'); // 'expanded' is the new 'active-parent'
+        }
+    });
+
+    // Activate the clicked LI
+    targetLi.classList.add('active');
+
+    if (targetLi.classList.contains('dynamic-nav-item')) {
+      // If a dynamic item is clicked, ensure its parent (PW) is marked as expanded
+      publicWarehouseMenuItem.classList.add('expanded');
+    } else {
+      // If a static top-level item (not PW itself, unless PW becomes clickable for a page) is clicked,
+      // remove dynamic items.
+      if (targetLi !== publicWarehouseMenuItem) { // Check it's not PW itself
+          removeDynamicNavItems();
+      }
+    }
+    loadPage(page);
+  });
+
+  // Initial state: Ensure no dynamic items are present, PW is not expanded.
+  removeDynamicNavItems(); 
 }
 
 // 加载页面内容
 function loadPage(page) {
-const content = document.getElementById('content');
+  const content = document.getElementById('content');
+  // If page is null or undefined (e.g. clicked on "Public Warehouse" main item which doesn't have data-page)
+  // then do nothing. Content loading is only for items with data-page.
+  if (!page) {
+    return; 
+  }
 
-switch (page) {
-  case 'dashboard':
-    loadDashboard(); // Defined below
-    break;
-  case 'products':
-    loadProducts(); 
-    break;
-  case 'inventory':
-    loadInventory(); 
-    break;
-  case 'transactions':
-    loadTransactions(); 
-    break;
-  case 'inbound':
-    loadInboundForm(); 
-    break;
-  case 'outbound':
-    loadOutboundForm(); 
-    break;
-  default:
-    loadDashboard();
+  switch (page) {
+    case 'dashboard':
+      loadDashboard(); // Defined below
+      break;
+    case 'products':
+      loadProducts(); 
+      break;
+    case 'inventory':
+      loadInventory(); 
+      break;
+    case 'transactions':
+      loadTransactions(); 
+      break;
+    case 'inbound':
+      loadInboundForm(); 
+      break;
+    case 'outbound':
+      loadOutboundForm(); 
+      break;
+    case 'jordon':
+      loadJordonPage(); // New page
+      break;
+    case 'lineage':
+      content.innerHTML = '<h1>Lineage (Coming Soon)</h1>'; // Placeholder
+      break;
+    case 'singlong':
+      content.innerHTML = '<h1>Sing Long (Coming Soon)</h1>'; // Placeholder
+      break;
+    default:
+      loadDashboard();
+  }
 }
+
+// Placeholder for Jordon page function
+async function loadJordonPage() {
+    const content = document.getElementById('content');
+    try {
+        // Fetch the content of jordon.html
+        const response = await fetch('jordon.html');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const htmlContent = await response.text();
+        
+        // Set the content of the main content area
+        content.innerHTML = htmlContent;
+        
+        // Initialize the tabs for the Jordon page
+        // Ensure initJordonTabs is defined (it should be, as jordon.js should be loaded)
+        if (typeof initJordonTabs === 'function') {
+            initJordonTabs();
+        } else {
+            console.error('initJordonTabs function not found. Ensure jordon.js is loaded and correct.');
+            // Optionally, try to load it dynamically if not found, though this adds complexity
+            // For now, we assume jordon.js is included in index.html
+        }
+    } catch (error) {
+        console.error('Failed to load Jordon page:', error);
+        content.innerHTML = '<h1>Error loading Jordon page</h1><p>Please try again later.</p>';
+    }
 }
 
 // 加载仪表盘
@@ -336,7 +485,7 @@ try {
       alert('Product API is not available. Cannot validate product.');
       submitButton.disabled = false; submitButton.textContent = 'Submit'; return;
   }
-  const product = await window.productAPI.getProductByCode(rawData.productCode);
+  const product = await window.productAPI.getProductBy_Code(rawData.productCode); // Typo corrected: getProductBy_Code -> getProductByCode
   if (!product) {
     alert(`Product with code "${rawData.productCode}" not found.`);
     submitButton.disabled = false; submitButton.textContent = 'Submit'; return;
