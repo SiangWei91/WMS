@@ -78,7 +78,6 @@ nav ul li i {
   margin-left: 0;
 }
 
-
 .header {
   height: 70px;
   background-color: #fff;
@@ -561,7 +560,6 @@ tr:hover {
 .sidebar.sidebar-collapsed nav ul {
   display: none;
 }
-
 
 .sidebar-toggle {
   font-size: 1.5rem;
