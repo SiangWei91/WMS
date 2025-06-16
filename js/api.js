@@ -1,4 +1,3 @@
-
 const productAPI_firestore = {
     async getProducts(params = {}) { // params currently not fully used for query conditions, can be added
         try {
@@ -94,6 +93,26 @@ const productAPI_firestore = {
         } catch (error) {
             console.error(`Error fetching product by code ${productCode} from Firestore:`, error);
             throw error; // Re-throw to be caught by caller
+        }
+    },
+
+    // Replaced searchProductsByName with getAllProducts
+    async getAllProducts() {
+        const productsCollectionRef = window.db.collection("products");
+        try {
+            // Order by name for consistency
+            const querySnapshot = await productsCollectionRef.orderBy("name", "asc").get(); 
+            
+            const products = [];
+            querySnapshot.forEach(doc => {
+                products.push({ id: doc.id, ...doc.data() });
+            });
+            
+            console.log(`Fetched ${products.length} products for client-side search cache.`);
+            return products;
+        } catch (error) {
+            console.error("Error fetching all products: ", error);
+            throw error; 
         }
     }
 };
@@ -357,3 +376,77 @@ window.dashboardAPI = {
 };
 
 console.log("productAPI, inventoryAPI, transactionAPI (inbound/outbound/getTransactions), and dashboardAPI now use Firestore.");
+
+// Jordon specific API functions
+window.jordonAPI = {
+    // Function to add multiple Jordon stock items using a batched write
+    async addJordonStockItems(itemsArray) {
+        if (!itemsArray || itemsArray.length === 0) {
+            throw new Error("No items provided to add.");
+        }
+
+        const batch = window.db.batch(); // Use window.db
+        const itemsCollectionRef = window.db.collection("jordonInventoryItems"); // Use window.db
+
+        itemsArray.forEach(item => {
+            const newItemRef = itemsCollectionRef.doc(); // Auto-generate document ID
+            const itemDataWithTimestamp = {
+                ...item,
+                // Ensure numeric types for these fields, defaulting to 0 if conversion fails or value is missing
+                totalCartons: Number(item.totalCartons) || 0, 
+                physicalPallets: Number(item.physicalPallets) || 0, 
+                stockInTimestamp: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            batch.set(newItemRef, itemDataWithTimestamp);
+        });
+
+        try {
+            await batch.commit();
+            console.log(`${itemsArray.length} Jordon stock items added successfully.`);
+            return { success: true, count: itemsArray.length };
+        } catch (error) {
+            console.error("Error adding Jordon stock items in batch: ", error);
+            throw error; // Re-throw the error to be caught by the caller
+        }
+    },
+    // Add other Jordon-specific API functions here in the future
+    
+    // Function to get all Jordon stock items
+    async getJordonInventoryItems() {
+        const itemsCollectionRef = window.db.collection("jordonInventoryItems"); // Use window.db
+        try {
+            // Changed orderBy:
+            const querySnapshot = await itemsCollectionRef
+                .orderBy("lotNumber", "asc")
+                .orderBy("stockInTimestamp", "asc")
+                .get();
+            
+            const items = [];
+            querySnapshot.forEach(doc => {
+                items.push({ id: doc.id, ...doc.data() });
+            });
+            
+            console.log(`Fetched ${items.length} Jordon stock items, ordered by Lot Number then Timestamp.`); // Updated log
+            return items;
+        } catch (error) {
+            console.error("Error fetching Jordon stock items: ", error);
+            throw error; // Re-throw the error to be caught by the caller
+        }
+    }
+};
+
+// Diagnostic logs at the end of api.js
+console.log('END OF js/api.js: execution complete.');
+if (window.jordonAPI) {
+    console.log('END OF js/api.js: window.jordonAPI object:', window.jordonAPI);
+    console.log('END OF js/api.js: typeof window.jordonAPI.getJordonInventoryItems:', typeof window.jordonAPI.getJordonInventoryItems);
+    console.log('END OF js/api.js: typeof window.jordonAPI.addJordonStockItems:', typeof window.jordonAPI.addJordonStockItems);
+} else {
+    console.error('END OF js/api.js: CRITICAL - window.jordonAPI is NOT defined.');
+}
+if (window.productAPI) {
+    console.log('END OF js/api.js: window.productAPI object:', window.productAPI);
+    console.log('END OF js/api.js: typeof window.productAPI.searchProductsByName:', typeof window.productAPI.searchProductsByName);
+} else {
+    console.warn('END OF js/api.js: window.productAPI is NOT defined (this might be okay if not used by Jordon page yet).');
+}
