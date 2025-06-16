@@ -1,0 +1,250 @@
+/* === Public Warehouse Submenu === */
+.sidebar nav ul li ul {
+  list-style-type: none;
+  padding-left: 20px; /* Indent sub-items */
+  /* display: none; /* Already handled by inline style, but can be here too */
+  max-height: 0; /* For smooth transition if desired later */
+  overflow: hidden;
+  transition: max-height 0.3s ease-out; /* Example transition */
+}
+
+.sidebar nav ul li ul.expanded {
+  /* display: block; /* Or remove display:none from inline style */
+  max-height: 500px; /* Adjust as needed, should be > actual content height */
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.sidebar nav ul li .public-warehouse-toggle {
+  display: flex;
+  /* justify-content: space-between; /* REMOVED */
+  align-items: center;
+  width: 100%; /* Ensure it takes full width of li */
+}
+
+/* Icon within the toggle for Public Warehouse main item */
+.sidebar nav ul li#public-warehouse-menu .public-warehouse-toggle > i {
+  margin-right: 10px;
+  width: 20px; /* Match other nav icons */
+  text-align: center; /* Match other nav icons */
+}
+
+.sidebar nav ul li .public-warehouse-toggle .menu-text {
+  /* margin-left: 10px; /* REMOVED */
+  /* No specific margin needed here now as icon provides margin-right */
+}
+
+.sidebar nav ul li .public-warehouse-toggle .toggle-icon {
+  margin-left: auto; /* Pushes icon to the right */
+  transition: transform 0.3s ease;
+}
+
+.sidebar nav ul li .public-warehouse-toggle .toggle-icon.expanded {
+  transform: rotate(180deg);
+}
+
+/* Style for the main "Public Warehouse" li when its submenu is open or a sub-item is active */
+/* This is covered by .sidebar nav ul li.active, but if specific styling for parent is needed: */
+.sidebar nav ul li#public-warehouse-menu.active {
+  /* Example: if you want the parent to look different than other active items when expanded */
+  /* background-color: #4a5568; */ /* Slightly different background to show it's active/open */
+}
+
+/* === Jordon Page Tabs === */
+.jordon-page-container {
+  padding: 20px;
+}
+
+.tabs-container {
+  border-bottom: 2px solid #e2e8f0; /* Light border for the tab bar */
+  margin-bottom: 20px;
+}
+
+ul.tabs-nav {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+}
+
+li.tab-item {
+  padding: 10px 20px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-bottom: none; /* Remove bottom border for inactive tabs */
+  margin-right: 5px;
+  border-radius: 5px 5px 0 0; /* Rounded corners for top */
+  position: relative;
+  bottom: -1px; /* To align with the content border if needed */
+  background-color: #f7fafc; /* Light background for inactive tabs */
+  color: #4a5568; /* Default text color */
+}
+
+li.tab-item:hover {
+  background-color: #edf2f7; /* Slightly darker on hover */
+}
+
+li.tab-item.active {
+  background-color: #fff; /* White background for active tab */
+  border-color: #e2e8f0 #e2e8f0 #fff; /* Border to match container and hide bottom line */
+  border-bottom: 1px solid #fff; /* Make it look like it's part of the content area */
+  color: #2d3748; /* Darker text for active tab */
+  font-weight: bold;
+}
+
+.tab-content-container {
+  /* Styles for the content area if needed, e.g., padding, border */
+}
+
+.tab-content {
+  display: none; /* Hide inactive tab content */
+  padding: 20px;
+  border: 1px solid #e2e8f0; /* Border around content */
+  border-top: none; /* Remove top border as tabs handle it */
+  border-radius: 0 0 5px 5px; /* Rounded bottom corners */
+  background-color: #fff; /* White background for content */
+}
+
+.tab-content.active {
+  display: block; /* Show active tab content */
+}
+
+/* Ensure main content area takes remaining height if needed */
+/* .main-content .content { */
+/* flex-grow: 1; */
+/* overflow-y: auto; */
+/* } */
+
+/* Style for the main "Public Warehouse" li when its submenu is open (dynamic items are shown) */
+.sidebar nav ul li#public-warehouse-menu.expanded > .public-warehouse-toggle {
+  background-color: #4a5568; /* Example: same as active link, or a bit lighter/darker */
+  /* color: #fff; */ /* Ensure text is readable if background changes significantly */
+}
+
+/* Ensure dynamic nav items look like other nav items */
+/* This might not be strictly necessary if they inherit styles correctly, 
+ but can be used for overrides or specific adjustments. */
+.sidebar nav ul li.dynamic-nav-item {
+  /* No specific styling needed if they should look identical to other <li> elements in the main nav,
+     assuming general 'nav ul li' styles from style.css apply.
+     If specific indentation or other tweaks are needed for dynamic items, they'd go here.
+     For example, if they were meant to look like the old sub-menu:
+     padding-left: 30px; /* More indent than the old static ul's padding-left: 20px on its li children */
+  */
+}
+
+/* Smaller text for Jordon inventory table cells */
+.jordon-page-container .table-container td {
+  font-size: 0.9em; /* Or specific px value like 13px */
+  /* Optionally, adjust padding if smaller text makes cells look too empty */
+  /* padding-top: 8px; */
+  /* padding-bottom: 8px; */
+}
+
+/* Highlight classes for mixed pallet groups (applied to specific TDs) */
+td.mixed-pallet-group-1 {
+  background-color: #e6f7ff !important; /* Light blue */
+}
+td.mixed-pallet-group-1:hover { 
+  background-color: #d1ecf1 !important; /* Slightly darker blue */
+}
+
+td.mixed-pallet-group-2 {
+  background-color: #f6f6f6 !important; /* Very light grey */
+}
+td.mixed-pallet-group-2:hover {
+  background-color: #e9e9e9 !important; /* Slightly darker grey */
+}
+
+/* Styling for the Stock In Table within Jordon Page */
+.jordon-page-container #stock-in-content h2 {
+  margin-bottom: 15px; /* Space below "Jordon Stock In" title */
+}
+
+.jordon-page-container #stock-in-table-body td {
+  vertical-align: middle; /* Align cell content vertically */
+  position: relative; /* For positioning dropdowns within cells if needed, like product search */
+}
+
+/* Inputs and Selects within the Stock In table for a cleaner look */
+.jordon-page-container #stock-in-table-body input[type="text"],
+.jordon-page-container #stock-in-table-body input[type="date"],
+.jordon-page-container #stock-in-table-body input[type="number"],
+.jordon-page-container #stock-in-table-body select {
+  width: 100%;
+  padding: 6px 4px; /* Adjust padding as needed */
+  font-size: 0.9em; 
+  border: none; /* Remove all borders */
+  border-bottom: 1px solid #ccc; /* Add only a bottom border */
+  border-radius: 0; /* No border radius for a flatter look */
+  box-sizing: border-box;
+  background-color: transparent; /* Make background transparent */
+}
+
+/* Focus style for inputs/selects */
+.jordon-page-container #stock-in-table-body input[type="text"]:focus,
+.jordon-page-container #stock-in-table-body input[type="date"]:focus,
+.jordon-page-container #stock-in-table-body input[type="number"]:focus,
+.jordon-page-container #stock-in-table-body select:focus {
+  outline: none; /* Remove default browser outline */
+  border-bottom-color: #3498db; /* Change bottom border color on focus (example color) */
+  /* box-shadow: 0 1px 0 #3498db; /* Alternative focus: subtle shadow */
+}
+
+/* Adjust read-only spans to align with the new input appearance */
+.jordon-page-container #stock-in-table-body .item-code-display,
+.jordon-page-container #stock-in-table-body .packing-size-display {
+  display: block; 
+  padding: 6px 4px; /* Match input padding */
+  font-size: 0.9em;
+  min-height: calc(0.9em + 12px + 1px); /* Approximate height: font-size (0.9em) + vertical padding (6px*2=12px) + border-bottom (1px) */
+}
+
+/* Style for action buttons in table (e.g., delete button) */
+.jordon-page-container #stock-in-table-body .delete-row-btn {
+  padding: 2px 5px; /* Reduced padding */
+  font-size: 0.8em; /* Keep font size or reduce slightly if icon is too large */
+  line-height: 1.2; /* Adjust line height if needed for smaller padding */
+}
+
+/* Increase width of Product column in Stock In table */
+.jordon-page-container #stock-in-table-body tr td:first-child,
+.jordon-page-container #stock-in-content thead tr th:first-child {
+  min-width: 200px; /* Or a percentage like width: 25%; */
+  /* Adjust as needed */
+}
+
+/* Styles for Product Search Dropdown */
+.product-search-results-dropdown {
+  list-style-type: none; 
+  padding-left: 0; 
+  margin-top: 0; 
+  /* max-height, overflow-y, border, background-color, position, width are often set by JS for dynamic positioning */
+  /* These are base styles or fallbacks */
+  border: 1px solid #ccc; 
+  background-color: white; 
+  max-height: 150px; 
+  overflow-y: auto; /* For scrolling within the dropdown itself if many items */
+  position: absolute; /* Ensure this is set for z-index and positioning to work against parent cell */
+  z-index: 9999; /* Increased z-index */
+  width: 100%; /* Will be set by JS to match input, but good default */
+  box-shadow: 0 2px 5px rgba(0,0,0,0.15); /* Optional: add a slight shadow for better depth */
+}
+
+.product-search-item, .product-search-item-none {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #eee; 
+}
+.product-search-item:last-child {
+  border-bottom: none;
+}
+
+.product-search-item:hover {
+  background-color: #f0f0f0;
+}
+
+/* Ensure table container in stock-in tab does not clip the dropdown */
+.jordon-page-container #stock-in-content .table-container {
+  overflow: visible; /* Override general .table-container rule from style.css if it exists */
+}
