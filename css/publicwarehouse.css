@@ -210,8 +210,30 @@ td.mixed-pallet-group-2:hover {
 /* Increase width of Product column in Stock In table */
 .jordon-page-container #stock-in-table-body tr td:first-child,
 .jordon-page-container #stock-in-content thead tr th:first-child {
-  min-width: 200px; /* Or a percentage like width: 25%; */
+  min-width: 250px; /* Or a percentage like width: 30%; */
   /* Adjust as needed */
+}
+
+/* Specific column widths for Stock In table */
+/* Ctn(s) - 11th column */
+.jordon-page-container #stock-in-content thead tr th:nth-child(11),
+.jordon-page-container #stock-in-table-body tr td:nth-child(11) {
+  width: 80px;
+  min-width: 70px;
+}
+
+/* Plt - 12th column */
+.jordon-page-container #stock-in-content thead tr th:nth-child(12),
+.jordon-page-container #stock-in-table-body tr td:nth-child(12) {
+  width: 70px;
+  min-width: 60px;
+}
+
+/* Mix ID - 13th column */
+.jordon-page-container #stock-in-content thead tr th:nth-child(13),
+.jordon-page-container #stock-in-table-body tr td:nth-child(13) {
+  width: 70px;
+  min-width: 60px;
 }
 
 /* Styles for Product Search Dropdown */
