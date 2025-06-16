@@ -94,24 +94,35 @@ const productAPI_firestore = {
             console.error(`Error fetching product by code ${productCode} from Firestore:`, error);
             throw error; // Re-throw to be caught by caller
         }
-    },
+    }, // Added comma here
 
-    // Replaced searchProductsByName with getAllProducts
-    async getAllProducts() {
+    // Function to search products by name (starts-with, case-sensitive)
+    async searchProductsByName(searchText) {
+        if (!searchText || searchText.trim() === "") {
+            return []; // Return empty if search text is empty
+        }
+
         const productsCollectionRef = window.db.collection("products");
+        const searchTerm = searchText.trim(); 
+
         try {
-            // Order by name for consistency
-            const querySnapshot = await productsCollectionRef.orderBy("name", "asc").get(); 
+            // Firestore 'starts-with' query for 'name' field
+            // Using \uf8ff as a high Unicode character to effectively create a range query
+            const querySnapshot = await productsCollectionRef
+                .where('name', '>=', searchTerm)
+                .where('name', '<=', searchTerm + '\uf8ff')
+                .limit(10) // Limit results for performance
+                .get();
             
             const products = [];
             querySnapshot.forEach(doc => {
                 products.push({ id: doc.id, ...doc.data() });
             });
             
-            console.log(`Fetched ${products.length} products for client-side search cache.`);
+            console.log(`Found ${products.length} products for search term: "${searchText}"`);
             return products;
         } catch (error) {
-            console.error("Error fetching all products: ", error);
+            console.error(`Error searching products by name for "${searchText}": `, error);
             throw error; 
         }
     }
