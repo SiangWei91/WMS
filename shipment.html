@@ -1,13 +1,17 @@
 <div class="shipment-content-area"> <!-- Optional wrapper for styling -->
-  <h2>Shipment Data Upload</h2>
-  <input type="file" id="excelFileInput" accept=".xlsx, .xlsm" />
-  <div class="tab-action-bar" id="shipmentTabActionBar"> <!-- New wrapper -->
-      <div id="shipmentTabNav" style="display: none; flex-grow: 1;"> 
-          <!-- Tabs will be dynamically inserted here by JavaScript -->
-      </div>
-      <button id="updateInventoryBtn" style="display: none;">Update to Inventory</button>
+    <h2>Shipment Data Upload</h2>
+    <input type="file" id="excelFileInput" accept=".xlsx, .xlsm" />
+    <div class="tab-action-bar" id="shipmentTabActionBar"> <!-- New wrapper -->
+        <div id="shipmentTabNav" style="display: none; flex-grow: 1;"> 
+            <!-- Tabs will be dynamically inserted here by JavaScript -->
+        </div>
+        <button id="updateInventoryBtn" style="display: none;">Update to Inventory</button>
+    </div>
+    <div id="shipmentDetailsContainer">
+        <!-- Container Number and Stored Date will be displayed here -->
+    </div>
+    <div id="resultsContainer">
+        <!-- Results will be displayed here by js/shipment.js for the active tab -->
+    </div>
   </div>
-  <div id="resultsContainer">
-      <!-- Results will be displayed here by js/shipment.js for the active tab -->
-  </div>
-</div>
+  
