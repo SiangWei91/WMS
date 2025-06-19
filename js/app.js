@@ -241,6 +241,33 @@ function loadPage(page) {
     case 'outbound':
       loadOutboundForm(); 
       break;
+    case 'shipment':
+      const contentArea = document.getElementById('content');
+      if (contentArea) { // Ensure contentArea exists
+        fetch('shipment.html')
+          .then(response => {
+            if (!response.ok) {
+              throw new Error('Network response was not ok for shipment.html: ' + response.statusText);
+            }
+            return response.text();
+          })
+          .then(html => {
+            contentArea.innerHTML = html;
+            if (typeof initializeShipmentFeature === 'function') {
+              initializeShipmentFeature();
+            } else {
+              console.error('Error: initializeShipmentFeature function not found. Was js/shipment.js loaded correctly?');
+              contentArea.innerHTML = '<p style="color: red;">Error loading shipment page components. Function not found.</p>';
+            }
+          })
+          .catch(error => {
+            console.error('Failed to load shipment page:', error);
+            contentArea.innerHTML = `<p style="color: red;">Failed to load shipment page: ${error.message}. Please try again later.</p>`;
+          });
+      } else {
+        console.error("Error: Main content area ('content') not found.");
+      }
+      break;
     case 'jordon':
       loadJordonPage(); // New page
       break;
