@@ -235,3 +235,30 @@
 #resultsContainer td:last-child { 
   text-align: center; 
 }
+
+/* Styles for Shipment Details Container */
+div#shipmentDetailsContainer {
+  margin-top: 15px;    /* Gap above the details section */
+  margin-bottom: 15px; /* Gap below the details section, before the table/action bar */
+  padding: 10px;       /* Padding inside the container */
+  background-color: #f9f9f9; /* A very light grey background for subtle distinction */
+  border-radius: 4px;  /* Slightly rounded corners */
+  border: 1px solid #eee; /* A light border */
+}
+
+div#shipmentDetailsContainer p {
+  margin-bottom: 8px; /* Gap between "Container Number" and "Stored Date" lines */
+  margin-top: 0;      /* Remove default top margin for p if any */
+  line-height: 1.6;   /* Improve readability */
+  font-size: 0.95em;  /* Slightly smaller than default, or adjust as needed */
+}
+
+/* Ensure the last p element in the container doesn't have a bottom margin */
+div#shipmentDetailsContainer p:last-child {
+  margin-bottom: 0;
+}
+
+/* The strong tag for labels is already making them bold.
+   If further styling for labels or values is needed,
+   we would use spans with classes as discussed earlier.
+   For now, this keeps it simple. */
