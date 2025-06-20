@@ -2,6 +2,7 @@
 
 let currentInventorySummaryItems = [];
 let jordonStockOutItems = []; // Array to store items added to the stock out list
+let mainWarehouses = []; // Array to store main warehouse data
 
 // Helper function to escape HTML characters
 function escapeHtml(unsafe) {
@@ -12,6 +13,30 @@ function escapeHtml(unsafe) {
          .replace(/>/g, "&gt;")
          .replace(/"/g, "&quot;")
          .replace(/'/g, "&#039;");
+}
+
+async function loadWarehouseData() {
+    try {
+        const db = firebase.firestore();
+        const warehousesRef = db.collection('warehouses');
+        // Query changed to use '3plpick' field instead of 'type'
+        const q = warehousesRef.where('3plpick', '==', 'for_3pl_list').where('active', '==', true);
+        const snapshot = await q.get();
+
+        if (snapshot.empty) {
+            console.log("No active warehouses found for '3plpick' type 'for_3pl_list'.");
+            mainWarehouses = []; // Ensure it's empty if no data
+        } else {
+            mainWarehouses = snapshot.docs.map(doc => ({
+                id: doc.id,
+                name: doc.data().name
+            }));
+            console.log("Loaded warehouses for '3plpick' type 'for_3pl_list':", mainWarehouses);
+        }
+    } catch (error) {
+        console.error("Error loading warehouse data:", error);
+        mainWarehouses = []; // Ensure it's empty on error
+    }
 }
 
 async function loadPendingJordonStock() {
@@ -313,7 +338,8 @@ function activateJordonTab(tabElement) {
     }
 }
 
-function initJordonTabs(containerElement) { 
+async function initJordonTabs(containerElement) { 
+    await loadWarehouseData(); // Load warehouse data first
     console.log("Initializing Jordon tabs and stock-in functionality.");
     const tabContainer = containerElement.querySelector('.jordon-page-container .tabs-container');
     if (!tabContainer) {
@@ -417,7 +443,7 @@ function initJordonTabs(containerElement) {
     } else {
         console.warn('#stock-out-content div not found in containerElement for event delegation.');
     }
-    renderStockOutPreview(stockOutContentDiv);
+    renderStockOutPreview();
 }
 
 /**
@@ -518,60 +544,6 @@ function handleInventoryRowClick(event) {
 
         popupInfoSection.appendChild(itemDetailContainer);
 
-        // Add separator if multiple items
-        if (itemsForPopup.length > 1 && index < itemsForPopup.length - 1) {
-            itemDetailContainer.style.marginBottom = '15px';
-            itemDetailContainer.style.borderBottom = '1px solid #eee';
-            itemDetailContainer.style.paddingBottom = '10px';
-        }
-    });
-
-    // Retain general context on the popup dataset
-    stockOutPopup.dataset.clickedMixedPalletGroupId = clickedMixedPalletGroupId;
-    stockOutPopup.dataset.clickedItemId = clickedItemId;
-
-    // Removed popupInputSection declaration and clearing. Inputs are now added to popupInfoSection.
-
-    itemsForPopup.forEach((itemObject, index) => { // Added index back to the loop signature
-        const itemDetailContainer = document.createElement('div');
-        itemDetailContainer.className = 'popup-item-details';
-
-        const fieldsToShow = [
-            { label: 'Item Code :', value: itemObject.productCode },
-            { label: 'Product Description :', value: itemObject.productName },
-            { label: 'Location :', value: (itemObject._3plDetails && itemObject._3plDetails.location) || '' },
-            { label: 'Lot Number :', value: (itemObject._3plDetails && itemObject._3plDetails.lotNumber) || '' },
-            { label: 'Batch Number :', value: itemObject.batchNo || '' },
-            { label: 'Current Quantity :', value: itemObject.quantity },
-            { label: 'Current Pallets :', value: (itemObject._3plDetails && itemObject._3plDetails.pallet) || '0' }
-        ];
-
-        fieldsToShow.forEach(field => {
-            const lineDiv = document.createElement('div');
-            lineDiv.className = 'popup-info-line';
-
-            const labelSpan = document.createElement('span');
-            labelSpan.className = 'popup-label';
-            labelSpan.textContent = field.label;
-
-            const valueSpan = document.createElement('span');
-            valueSpan.className = 'popup-value';
-            valueSpan.textContent = escapeHtml(String(field.value));
-
-            lineDiv.appendChild(labelSpan);
-            lineDiv.appendChild(valueSpan);
-            itemDetailContainer.appendChild(lineDiv);
-        });
-
-        popupInfoSection.appendChild(itemDetailContainer);
-
-        // Add separator if multiple items and it's not the last item's details
-        if (itemsForPopup.length > 1 && index < itemsForPopup.length - 1) {
-            itemDetailContainer.style.marginBottom = '15px';
-            itemDetailContainer.style.borderBottom = '1px solid #eee';
-            itemDetailContainer.style.paddingBottom = '10px';
-        }
-
         // Create and append input group for the current itemObject to popupInfoSection
         const itemInputGroup = document.createElement('div');
         itemInputGroup.className = 'popup-item-input-group';
@@ -621,8 +593,19 @@ function handleInventoryRowClick(event) {
         itemInputGroup.appendChild(palletInput);
         
         popupInfoSection.appendChild(itemInputGroup);
-        itemInputGroup.style.marginBottom = '20px'; // Add spacing after the input group
+        // itemInputGroup.style.marginBottom = '20px'; // Add spacing after the input group - Replaced by separator logic
+
+        // Add separator for the entire item block (details + inputs) if multiple items
+        if (itemsForPopup.length > 1 && index < itemsForPopup.length - 1) {
+            itemInputGroup.style.paddingBottom = '15px';
+            itemInputGroup.style.marginBottom = '15px';
+            itemInputGroup.style.borderBottom = '1px solid #ccc';
+        }
     });
+    
+    // Retain general context on the popup dataset
+    stockOutPopup.dataset.clickedMixedPalletGroupId = clickedMixedPalletGroupId;
+    stockOutPopup.dataset.clickedItemId = clickedItemId;
     
     // Display the popup
     stockOutPopup.style.display = 'block';
@@ -697,7 +680,13 @@ function handleAddToStockOutList() {
             container: qtyInput.dataset.container,
             dateStored: qtyInput.dataset.dateStored,
             currentPallets: qtyInput.dataset.currentPallets,
+            selectedDestinationWarehouseId: null, // Initialize with null
         };
+
+        // Default to the first main warehouse if available
+        if (mainWarehouses && mainWarehouses.length > 0) {
+            stockOutItem.selectedDestinationWarehouseId = mainWarehouses[0].id;
+        }
         itemsToAdd.push(stockOutItem);
     });
 
@@ -849,10 +838,10 @@ async function handleSubmitStockIn() {
  * Renders the preview of items added to the stock-out list in the #stock-out-content div.
  * Displays a table of items or a message if the list is empty.
  */
-function renderStockOutPreview(stockOutContentDivFromCaller) {
-    const stockOutContentDiv = stockOutContentDivFromCaller;
+function renderStockOutPreview() {
+    const stockOutContentDiv = document.getElementById('stock-out-content');
     if (!stockOutContentDiv) {
-        console.error('#stock-out-content div (from caller) not found. Cannot render preview.');
+        console.error('#stock-out-content div not found. Cannot render preview.');
         return;
     }
 
@@ -883,6 +872,7 @@ function renderStockOutPreview(stockOutContentDivFromCaller) {
                 <th>Location</th>
                 <th>Lot No</th>
                 <th>Pallet ID (Out)</th>
+                <th>Warehouse</th>
                 <th>Quantity</th>
                 <th>Batch No</th>
                 <th>Actions</th>
@@ -892,6 +882,16 @@ function renderStockOutPreview(stockOutContentDivFromCaller) {
     `;
 
     jordonStockOutItems.forEach((item, index) => {
+        let warehouseOptionsHtml = '';
+        if (mainWarehouses && mainWarehouses.length > 0) {
+            mainWarehouses.forEach(warehouse => {
+                const isSelected = item.selectedDestinationWarehouseId === warehouse.id;
+                warehouseOptionsHtml += `<option value="${escapeHtml(warehouse.id)}" ${isSelected ? 'selected' : ''}>${escapeHtml(warehouse.name)}</option>`;
+            });
+        } else {
+            warehouseOptionsHtml = '<option value="" disabled selected>No warehouses</option>';
+        }
+
         html += `
             <tr>
                 <td>${index + 1}</td>
@@ -900,6 +900,7 @@ function renderStockOutPreview(stockOutContentDivFromCaller) {
                 <td>${escapeHtml(item.location)}</td>
                 <td>${escapeHtml(item.lotNumber)}</td>
                 <td>${escapeHtml(item.palletId)}</td>
+                <td><select class="form-control form-control-sm warehouse-select" data-item-inventory-id="${escapeHtml(item.inventoryId)}">${warehouseOptionsHtml}</select></td>
                 <td>${escapeHtml(String(item.quantityToStockOut))}</td> 
                 <td>${escapeHtml(item.batchNumber)}</td>
                 <td><button class="btn btn-danger btn-sm remove-stock-out-item-btn" data-index="${index}">Remove</button></td>
