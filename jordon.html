@@ -1,3 +1,4 @@
+<link rel="stylesheet" href="css/jordon.css" />
 <div class="jordon-page-container">
   <div class="tabs-container">
     <ul class="tabs-nav">
@@ -27,7 +28,7 @@
               <th>Date Stored</th>
               <th>Container Number</th>
               <th>Total Cartons</th>
-              <th>Physical Pallets</th>
+              <th>Pallets</th>
             </tr>
           </thead>
           <tbody id="jordon-inventory-summary-tbody">
@@ -89,6 +90,60 @@
       <h2>Report</h2>
       <p>Content for Report will go here.</p>
       <!-- Add more specific content structure as needed -->
+    </div>
+  </div>
+
+  <!-- Stock Out Popup -->
+  <div id="stock-out-popup" style="display: none">
+    <div class="popup-content">
+      <span class="close-btn">&times;</span>
+      <h2>Stock Out Item</h2>
+      <div class="popup-info-section">
+        <div class="popup-info-line">
+            <span class="popup-label">Item Code :</span>
+            <span class="popup-value" id="stock-out-item-code"></span>
+        </div>
+        <div class="popup-info-line">
+            <span class="popup-label">Product Description :</span>
+            <span class="popup-value" id="stock-out-product-description"></span>
+        </div>
+        <div class="popup-info-line">
+            <span class="popup-label">Current Quantity :</span>
+            <span class="popup-value" id="stock-out-current-quantity"></span>
+        </div>
+        <div class="popup-info-line">
+            <span class="popup-label">Location :</span>
+            <span class="popup-value" id="stock-out-location"></span>
+        </div>
+        <div class="popup-info-line">
+            <span class="popup-label">Lot Number :</span>
+            <span class="popup-value" id="stock-out-lot-number"></span>
+        </div>
+        <div class="popup-info-line">
+            <span class="popup-label">Batch Number :</span>
+            <span class="popup-value" id="stock-out-batch-number"></span>
+        </div>
+        <div class="popup-info-line">
+            <span class="popup-label">Current Pallets :</span>
+            <span class="popup-value" id="stock-out-pallets"></span>
+        </div>
+        <div class="popup-info-line" id="popup-line-group-id" style="display: none;">
+            <span class="popup-label">Group ID :</span>
+            <span class="popup-value" id="stock-out-group-id"></span>
+        </div>
+      </div>
+      <div class="popup-input-section">
+        <label for="stock-out-quantity">Quantity to Stock Out:</label>
+        <input type="number" id="stock-out-quantity" name="stock-out-quantity" />
+      </div>
+      <div>
+        <label for="stock-out-pallet-id">Pallet ID:</label>
+        <input type="text" id="stock-out-pallet-id" name="stock-out-pallet-id" />
+      </div>
+      <div class="popup-buttons">
+        <button id="add-to-stock-out-list-btn">Add to Stock Out List</button>
+        <button id="close-popup-btn">Close</button>
+      </div>
     </div>
   </div>
 </div>
