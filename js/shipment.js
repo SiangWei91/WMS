@@ -265,7 +265,8 @@ function extractJordonData(jordonSheet, sheet1LookupMap) {
             packingSize: packingSize, // Using direct extraction: finalPackingSize
             batchNo: batchNo,         // Using direct extraction: finalBatchNo
             quantity: quantity,
-            pallet: pallet
+            pallet: pallet,
+            excelRowNumber: rowIndex + 1
         };
         extractedItems.push(item);
     }
@@ -529,6 +530,10 @@ async function handleUpdateInventoryClick() { // Made async
                 // The productCode was already validated as currentItemCode before calling lookupOrCreateProduct.
                 // No further validation for inventoryDoc.productCode needed here as it uses that validated code.
                 // Removed: if (viewName === 'Jordon') { console.log(...); }
+
+                if (viewName === 'Jordon' && item.hasOwnProperty('excelRowNumber')) {
+                    inventoryDoc.excelRowNumber = item.excelRowNumber;
+                }
                 
                 // Add to batch (Inventory item)
                 const newInventoryDocRef = db.collection('inventory').doc(); // Creates a new unique ID for the doc
