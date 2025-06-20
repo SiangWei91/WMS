@@ -296,15 +296,13 @@ async function loadJordonPage() {
         // Set the content of the main content area
         content.innerHTML = htmlContent;
         
-        // Initialize the tabs for the Jordon page
-        // Ensure initJordonTabs is defined (it should be, as jordon.js should be loaded)
-        if (typeof initJordonTabs === 'function') {
-            initJordonTabs();
-        } else {
-            console.error('initJordonTabs function not found. Ensure jordon.js is loaded and correct.');
-            // Optionally, try to load it dynamically if not found, though this adds complexity
-            // For now, we assume jordon.js is included in index.html
-        }
+        setTimeout(() => {
+            if (typeof initJordonTabs === 'function') {
+                initJordonTabs(content); // 'content' is the DOM element where htmlContent was injected
+            } else {
+                console.error('initJordonTabs function not found in app.js when attempting to initialize Jordon page.');
+            }
+        }, 0);
     } catch (error) {
         console.error('Failed to load Jordon page:', error);
         content.innerHTML = '<h1>Error loading Jordon page</h1><p>Please try again later.</p>';
