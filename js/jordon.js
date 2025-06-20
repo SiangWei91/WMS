@@ -313,11 +313,11 @@ function activateJordonTab(tabElement) {
     }
 }
 
-function initJordonTabs() { 
+function initJordonTabs(containerElement) { 
     console.log("Initializing Jordon tabs and stock-in functionality.");
-    const tabContainer = document.querySelector('.jordon-page-container .tabs-container');
+    const tabContainer = containerElement.querySelector('.jordon-page-container .tabs-container');
     if (!tabContainer) {
-        console.error("Jordon tab container not found.");
+        console.error("Jordon tab container not found within the provided containerElement.");
         return;
     }
     const tabItems = tabContainer.querySelectorAll('.tab-item');
@@ -415,9 +415,9 @@ function initJordonTabs() {
             }
         });
     } else {
-        console.warn('#stock-out-content div not found for event delegation.');
+        console.warn('#stock-out-content div not found in containerElement for event delegation.');
     }
-    renderStockOutPreview();
+    renderStockOutPreview(stockOutContentDiv);
 }
 
 /**
@@ -436,6 +436,7 @@ function handleInventoryRowClick(event) {
 
     const clickedMixedPalletGroupId = row.dataset.mixedPalletGroupId;
     const clickedLotNumber = row.dataset.lotNumber;
+    const clickedDateStored = row.dataset.dateStored; // Added this line
     const clickedItemId = row.dataset.itemId;
 
     let itemsForPopup = [];
@@ -467,7 +468,7 @@ function handleInventoryRowClick(event) {
         const matchingItems = currentInventorySummaryItems.filter(item => {
             return item._3plDetails &&
                    item._3plDetails.mixedPalletGroupId === clickedMixedPalletGroupId &&
-                   item._3plDetails.lotNumber === clickedLotNumber &&
+                   item._3plDetails.dateStored === clickedDateStored && // Changed condition here
                    item.id !== clickedItemId; // Exclude the already added original item
         });
         itemsForPopup = itemsForPopup.concat(matchingItems);
@@ -525,31 +526,104 @@ function handleInventoryRowClick(event) {
         }
     });
 
-    // Store essential data of the *originally clicked row* on the popup itself 
-    // for later use during stock-out submission (especially for the "Add to Stock Out List" button)
-    stockOutPopup.dataset.inventoryId = clickedItemId; // Use clickedItemId
-    stockOutPopup.dataset.productId = row.dataset.productId;
-    stockOutPopup.dataset.productCode = row.dataset.productCode;
-    stockOutPopup.dataset.productName = row.dataset.productName;
-    stockOutPopup.dataset.batchNo = row.dataset.batchNo;
-    stockOutPopup.dataset.warehouseId = 'jordon'; // Hardcoded as per requirements
-    stockOutPopup.dataset.currentQuantity = row.dataset.quantity;
-    stockOutPopup.dataset.location = row.dataset.location;
-    stockOutPopup.dataset.lotNumber = clickedLotNumber; // Use clickedLotNumber
-    stockOutPopup.dataset.productPackaging = row.dataset.productPackaging;
-    stockOutPopup.dataset.palletType = row.dataset.palletType;
-    stockOutPopup.dataset.container = row.dataset.container;
-    stockOutPopup.dataset.dateStored = row.dataset.dateStored;
-    stockOutPopup.dataset.currentPallets = row.dataset.pallets || '0';
-    // Storing the group ID and original item ID on the popup might be useful for the next step
+    // Retain general context on the popup dataset
     stockOutPopup.dataset.clickedMixedPalletGroupId = clickedMixedPalletGroupId;
     stockOutPopup.dataset.clickedItemId = clickedItemId;
 
+    // Removed popupInputSection declaration and clearing. Inputs are now added to popupInfoSection.
 
-    // Clear previous input values in the popup
-    document.getElementById('stock-out-quantity').value = '';
-    document.getElementById('stock-out-pallet-id').value = '';
+    itemsForPopup.forEach((itemObject, index) => { // Added index back to the loop signature
+        const itemDetailContainer = document.createElement('div');
+        itemDetailContainer.className = 'popup-item-details';
 
+        const fieldsToShow = [
+            { label: 'Item Code :', value: itemObject.productCode },
+            { label: 'Product Description :', value: itemObject.productName },
+            { label: 'Location :', value: (itemObject._3plDetails && itemObject._3plDetails.location) || '' },
+            { label: 'Lot Number :', value: (itemObject._3plDetails && itemObject._3plDetails.lotNumber) || '' },
+            { label: 'Batch Number :', value: itemObject.batchNo || '' },
+            { label: 'Current Quantity :', value: itemObject.quantity },
+            { label: 'Current Pallets :', value: (itemObject._3plDetails && itemObject._3plDetails.pallet) || '0' }
+        ];
+
+        fieldsToShow.forEach(field => {
+            const lineDiv = document.createElement('div');
+            lineDiv.className = 'popup-info-line';
+
+            const labelSpan = document.createElement('span');
+            labelSpan.className = 'popup-label';
+            labelSpan.textContent = field.label;
+
+            const valueSpan = document.createElement('span');
+            valueSpan.className = 'popup-value';
+            valueSpan.textContent = escapeHtml(String(field.value));
+
+            lineDiv.appendChild(labelSpan);
+            lineDiv.appendChild(valueSpan);
+            itemDetailContainer.appendChild(lineDiv);
+        });
+
+        popupInfoSection.appendChild(itemDetailContainer);
+
+        // Add separator if multiple items and it's not the last item's details
+        if (itemsForPopup.length > 1 && index < itemsForPopup.length - 1) {
+            itemDetailContainer.style.marginBottom = '15px';
+            itemDetailContainer.style.borderBottom = '1px solid #eee';
+            itemDetailContainer.style.paddingBottom = '10px';
+        }
+
+        // Create and append input group for the current itemObject to popupInfoSection
+        const itemInputGroup = document.createElement('div');
+        itemInputGroup.className = 'popup-item-input-group';
+
+        // Quantity Input
+        const qtyLabel = document.createElement('label');
+        qtyLabel.setAttribute('for', `stock-out-quantity-${itemObject.id}`);
+        qtyLabel.textContent = `Quantity for ${itemObject.productCode} (Lot: ${itemObject._3plDetails?.lotNumber || 'N/A'}):`;
+        
+        const qtyInput = document.createElement('input');
+        qtyInput.type = 'number';
+        qtyInput.id = `stock-out-quantity-${itemObject.id}`;
+        qtyInput.name = `stock-out-quantity-${itemObject.id}`;
+        qtyInput.className = 'dynamic-stock-out-quantity';
+        // Set data attributes (copied from the deleted loop)
+        qtyInput.dataset.itemId = itemObject.id;
+        qtyInput.dataset.productId = itemObject.productId || '';
+        qtyInput.dataset.productCode = itemObject.productCode || '';
+        qtyInput.dataset.productName = itemObject.productName || 'N/A';
+        qtyInput.dataset.batchNo = itemObject.batchNo || '';
+        qtyInput.dataset.warehouseId = 'jordon';
+        qtyInput.dataset.currentQuantity = itemObject.quantity !== undefined ? itemObject.quantity : 0;
+        qtyInput.dataset.location = (itemObject._3plDetails && itemObject._3plDetails.location) || '';
+        qtyInput.dataset.lotNumber = (itemObject._3plDetails && itemObject._3plDetails.lotNumber) || '';
+        qtyInput.dataset.productPackaging = itemObject.productPackaging || 'N/A';
+        qtyInput.dataset.palletType = (itemObject._3plDetails && itemObject._3plDetails.palletType) || '';
+        qtyInput.dataset.container = itemObject.container || '';
+        qtyInput.dataset.dateStored = (itemObject._3plDetails && itemObject._3plDetails.dateStored) || '';
+        qtyInput.dataset.currentPallets = (itemObject._3plDetails && itemObject._3plDetails.pallet) || '0';
+
+        // Pallet ID Input
+        const palletLabel = document.createElement('label');
+        palletLabel.setAttribute('for', `stock-out-pallet-${itemObject.id}`);
+        palletLabel.textContent = `Pallet ID for ${itemObject.productCode} (Lot: ${itemObject._3plDetails?.lotNumber || 'N/A'}):`;
+
+        const palletInput = document.createElement('input');
+        palletInput.type = 'text';
+        palletInput.id = `stock-out-pallet-${itemObject.id}`;
+        palletInput.name = `stock-out-pallet-${itemObject.id}`;
+        palletInput.className = 'dynamic-stock-out-pallet-id';
+        palletInput.dataset.itemId = itemObject.id; // Link to the item
+
+        itemInputGroup.appendChild(qtyLabel);
+        itemInputGroup.appendChild(qtyInput);
+        itemInputGroup.appendChild(document.createElement('br')); // Simple spacing
+        itemInputGroup.appendChild(palletLabel);
+        itemInputGroup.appendChild(palletInput);
+        
+        popupInfoSection.appendChild(itemInputGroup);
+        itemInputGroup.style.marginBottom = '20px'; // Add spacing after the input group
+    });
+    
     // Display the popup
     stockOutPopup.style.display = 'block';
 }
@@ -561,71 +635,86 @@ function handleInventoryRowClick(event) {
  */
 function handleAddToStockOutList() {
     const stockOutPopup = document.getElementById('stock-out-popup');
-    const quantityInput = document.getElementById('stock-out-quantity');
-    const palletIdInput = document.getElementById('stock-out-pallet-id');
+    const dynamicQuantityInputs = stockOutPopup.querySelectorAll('.dynamic-stock-out-quantity');
+    const dynamicPalletIdInputs = stockOutPopup.querySelectorAll('.dynamic-stock-out-pallet-id');
 
-    if (!stockOutPopup || !quantityInput || !palletIdInput) {
-        console.error("Popup, quantity input, or pallet ID input not found.");
-        alert("Error: Could not process the request. Popup elements missing.");
+    if (!stockOutPopup || dynamicQuantityInputs.length === 0) {
+        console.error("Popup or dynamic quantity inputs not found.");
+        alert("Error: Could not process the request. Popup input elements missing.");
         return;
     }
 
-    const quantityToStockOut = parseInt(quantityInput.value, 10);
-    const palletId = palletIdInput.value.trim();
-    
-    // Retrieve all necessary data stored on the popup's dataset
-    const {
-        inventoryId, productId, productCode, productName, /* batchNo is retrieved below */ 
-        warehouseId, currentQuantity: currentQuantityStr, location, lotNumber, 
-        /* productPackaging is retrieved below */ palletType, container, dateStored,
-        /* currentPallets is retrieved below */
-    } = stockOutPopup.dataset;
-    const currentQuantity = parseInt(currentQuantityStr, 10);
+    let allItemsValid = true;
+    const itemsToAdd = [];
 
-    // Retrieve additional data specifically requested for stockOutItem object
-    const productPackaging = stockOutPopup.dataset.productPackaging || '';
-    const batchNumber = stockOutPopup.dataset.batchNo || ''; // batchNo from dataset is batchNumber for the object
-    const currentPallets = stockOutPopup.dataset.currentPallets || '0'; // Renamed from currentPhysicalPallets
+    dynamicQuantityInputs.forEach(qtyInput => {
+        const itemId = qtyInput.dataset.itemId;
+        const palletInput = stockOutPopup.querySelector(`#stock-out-pallet-${itemId}`); // Find corresponding pallet input
+
+        const quantityToStockOut = parseInt(qtyInput.value, 10);
+        const palletId = palletInput ? palletInput.value.trim() : ""; // Get palletId, ensure palletInput exists
+        
+        const currentQuantity = parseInt(qtyInput.dataset.currentQuantity, 10);
+
+        // Validate Input: Quantity must be a positive number (or zero if allowed, but typically > 0 for stock out)
+        // Allow items with 0 quantity to be skipped without blocking others, unless a value is entered.
+        if (qtyInput.value.trim() !== '' && (isNaN(quantityToStockOut) || quantityToStockOut <= 0)) {
+            alert(`Please enter a valid positive quantity for item ${qtyInput.dataset.productCode} (Lot: ${qtyInput.dataset.lotNumber}).`);
+            qtyInput.focus();
+            allItemsValid = false;
+            return; // Stop processing this item
+        }
+        
+        // If quantity is 0 or input is empty, skip this item from being added to the list
+        if (quantityToStockOut === 0 || qtyInput.value.trim() === '') {
+            return; 
+        }
 
 
-    // Validate Input: Quantity must be a positive number
-    if (isNaN(quantityToStockOut) || quantityToStockOut <= 0) {
-        alert("Please enter a valid positive quantity to stock out.");
-        quantityInput.focus();
+        // Validate Input: Quantity to stock out cannot exceed available quantity
+        if (quantityToStockOut > currentQuantity) {
+            alert(`Quantity to stock out (${quantityToStockOut}) for item ${qtyInput.dataset.productCode} (Lot: ${qtyInput.dataset.lotNumber}) cannot exceed current available quantity (${currentQuantity}).`);
+            qtyInput.focus();
+            allItemsValid = false;
+            return; // Stop processing this item
+        }
+
+        // Create the stock-out item object with all relevant details from data attributes
+        const stockOutItem = {
+            inventoryId: itemId,
+            productId: qtyInput.dataset.productId,
+            productCode: qtyInput.dataset.productCode,
+            productName: qtyInput.dataset.productName,
+            productPackaging: qtyInput.dataset.productPackaging,
+            location: qtyInput.dataset.location,
+            lotNumber: qtyInput.dataset.lotNumber,
+            batchNumber: qtyInput.dataset.batchNo, // Note: batchNo from dataset is batchNumber
+            warehouseId: qtyInput.dataset.warehouseId,
+            originalQuantityInInventory: currentQuantity,
+            quantityToStockOut,
+            palletId,
+            palletType: qtyInput.dataset.palletType,
+            container: qtyInput.dataset.container,
+            dateStored: qtyInput.dataset.dateStored,
+            currentPallets: qtyInput.dataset.currentPallets,
+        };
+        itemsToAdd.push(stockOutItem);
+    });
+
+    if (!allItemsValid) {
+        return; // Stop if any validation failed
+    }
+
+    if (itemsToAdd.length === 0) {
+        alert("No items with valid quantities were entered for stock out.");
         return;
     }
 
-    // Validate Input: Quantity to stock out cannot exceed available quantity
-    if (quantityToStockOut > currentQuantity) {
-        alert(`Quantity to stock out (${quantityToStockOut}) cannot exceed current available quantity (${currentQuantity}).`);
-        quantityInput.focus();
-        return;
-    }
+    jordonStockOutItems.push(...itemsToAdd);
 
-    // Create the stock-out item object with all relevant details
-    const stockOutItem = {
-        inventoryId, 
-        productId, 
-        productCode, 
-        productName, 
-        productPackaging: productPackaging, 
-        location, 
-        lotNumber, 
-        batchNumber: batchNumber, 
-        warehouseId, 
-        originalQuantityInInventory: currentQuantity, 
-        quantityToStockOut, 
-        palletId, 
-        palletType, 
-        container, 
-        dateStored,
-        currentPallets: currentPallets, // Renamed from currentPhysicalPallets
-    };
 
-    jordonStockOutItems.push(stockOutItem);
-
-    // If this is the first item added, switch to the "Stock Out" tab to show the list
-    if (jordonStockOutItems.length === 1) {
+    // If this is the first item added (or first batch), switch to the "Stock Out" tab
+    if (jordonStockOutItems.length > 0 && itemsToAdd.length > 0) { // Check if new items were actually added
         const stockOutTabButton = document.querySelector('.tab-item[data-tab="stock-out"]');
         if (stockOutTabButton) {
             activateJordonTab(stockOutTabButton);
@@ -637,8 +726,8 @@ function handleAddToStockOutList() {
     renderStockOutPreview(); // Update the displayed list of items to be stocked out
 
     // Clear inputs and hide the popup
-    quantityInput.value = '';
-    palletIdInput.value = '';
+    dynamicQuantityInputs.forEach(input => input.value = '');
+    dynamicPalletIdInputs.forEach(input => input.value = '');
     stockOutPopup.style.display = 'none';
 }
 
@@ -760,10 +849,10 @@ async function handleSubmitStockIn() {
  * Renders the preview of items added to the stock-out list in the #stock-out-content div.
  * Displays a table of items or a message if the list is empty.
  */
-function renderStockOutPreview() {
-    const stockOutContentDiv = document.getElementById('stock-out-content');
+function renderStockOutPreview(stockOutContentDivFromCaller) {
+    const stockOutContentDiv = stockOutContentDivFromCaller;
     if (!stockOutContentDiv) {
-        console.error('#stock-out-content div not found. Cannot render preview.');
+        console.error('#stock-out-content div (from caller) not found. Cannot render preview.');
         return;
     }
 
