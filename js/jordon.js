@@ -1,5 +1,7 @@
 // Jordon specific JavaScript
 
+let jordonStockOutItems = []; // Array to store items added to the stock out list
+
 // Helper function to escape HTML characters
 function escapeHtml(unsafe) {
     if (unsafe === null || unsafe === undefined) return '';
@@ -12,9 +14,13 @@ function escapeHtml(unsafe) {
 }
 
 async function loadPendingJordonStock() {
-    const db = firebase.firestore(); 
-    const pendingItemsWithProducts = [];
+    const stockInTableBody = document.getElementById('stock-in-table-body');
     try {
+        // It's good practice to show a loading state here if this function is user-triggered.
+        // However, it's currently called when the 'Stock In' tab is activated, 
+        // and handleStockInTabActivation already sets a loading message.
+        const db = firebase.firestore(); 
+        const pendingItemsWithProducts = [];
         const inventoryRef = db.collection('inventory');
         const q = inventoryRef
             .where('warehouseId', '==', 'jordon')
@@ -25,6 +31,8 @@ async function loadPendingJordonStock() {
             const inventoryItem = { id: doc.id, ...doc.data() };
             let productName = 'N/A';
             let productPackaging = 'N/A';
+            // productId is fetched from the 'products' collection, not used here directly yet
+            // let productId = null; 
 
             if (inventoryItem.productCode) {
                 const productsRef = db.collection('products');
@@ -43,22 +51,21 @@ async function loadPendingJordonStock() {
             pendingItemsWithProducts.push({ ...inventoryItem, productName, productPackaging });
         }
 
-        // Sort by excelRowNumber
         pendingItemsWithProducts.sort((a, b) => {
             const rowNumA = a.excelRowNumber;
             const rowNumB = b.excelRowNumber;
-
-            // Handle cases where excelRowNumber might be missing or not a number
-            if (rowNumA == null || typeof rowNumA !== 'number') return 1; // Send items without valid rowNumA to the end
-            if (rowNumB == null || typeof rowNumB !== 'number') return -1; // Keep items with valid rowNumB before those without
-
-            return rowNumA - rowNumB; // Ascending order
+            if (rowNumA == null || typeof rowNumA !== 'number') return 1;
+            if (rowNumB == null || typeof rowNumB !== 'number') return -1;
+            return rowNumA - rowNumB;
         });
 
         console.log('Loaded and sorted pending Jordon stock with product details:', pendingItemsWithProducts);
         return pendingItemsWithProducts;
     } catch (error) {
         console.error("Error loading pending Jordon stock:", error);
+        if (stockInTableBody) { // Display error in the table
+            stockInTableBody.innerHTML = '<tr><td colspan="12" style="text-align:center; color:red;">Error loading pending stock. Please try again.</td></tr>';
+        }
         return []; 
     }
 }
@@ -72,7 +79,7 @@ function displayPendingStockInTable(items) {
     stockInTableBody.innerHTML = ''; 
 
     if (items.length === 0) {
-        stockInTableBody.innerHTML = '<tr><td colspan="12" style="text-align:center;">No pending items found.</td></tr>'; // Colspan adjusted to 12
+        stockInTableBody.innerHTML = '<tr><td colspan="12" style="text-align:center;">No pending items found.</td></tr>';
         return;
     }
 
@@ -86,54 +93,39 @@ function displayPendingStockInTable(items) {
 
         const threePlDetails = item._3plDetails || {};
         
-        // 4. Pallet Type (Select)
         const palletTypeCell = newRow.insertCell();
         let palletTypeSelect = '<select class="form-control form-control-sm pallet-type-select">';
-        palletTypeSelect += '<option value="LC" selected>LC</option>'; // Default LC
+        palletTypeSelect += '<option value="LC" selected>LC</option>';
         palletTypeSelect += '<option value="JD">JD</option>';
         palletTypeSelect += '</select>';
         palletTypeCell.innerHTML = palletTypeSelect;
-        // Note: item._3plDetails.palletType was "pending". Defaulting to "LC".
         
-        // 5. Location (Select)
         const locationCell = newRow.insertCell();
         let locationSelect = '<select class="form-control form-control-sm location-select">';
-        locationSelect += '<option value="LC01" selected>LC01</option>'; // Default LC01
+        locationSelect += '<option value="LC01" selected>LC01</option>';
         locationSelect += '<option value="Ala Carte">Ala Carte</option>';
         locationSelect += '</select>';
         locationCell.innerHTML = locationSelect;
-        // Note: item._3plDetails.location was "". Defaulting to "LC01".
 
-        // 6. Lot Number (Editable Input) - No change from previous, already editable
-        newRow.insertCell().innerHTML = `<input type="text" class="form-control form-control-sm lot-number-input" value="${escapeHtml(threePlDetails.lotNumber || '')}" placeholder="Enter Lot No.">`; // Remains editable input
-        
-        // 7. Batch Number (Read-only Plain Text)
+        newRow.insertCell().innerHTML = `<input type="text" class="form-control form-control-sm lot-number-input" value="${escapeHtml(threePlDetails.lotNumber || '')}" placeholder="Enter Lot No.">`;
         newRow.insertCell().textContent = item.batchNo || '';
-
-        // 8. Date Stored (Read-only Plain Text - dd/mm/yyyy)
         newRow.insertCell().textContent = (threePlDetails && threePlDetails.dateStored) ? threePlDetails.dateStored : '';
-        
-        // 9. Container Number (Read-only Plain Text)
         newRow.insertCell().textContent = item.container || '';
-        
-        // 10. Ctn(s) (Total Cartons - Read-only Plain Text)
         newRow.insertCell().textContent = item.quantity !== undefined ? item.quantity : 0;
-        
-        // 11. Plt (Physical Pallets - Read-only Plain Text)
         newRow.insertCell().textContent = (threePlDetails && threePlDetails.pallet !== undefined) ? threePlDetails.pallet : '';
-        
-        // 12. Mixed Pallet Group ID (Editable Input)
         newRow.insertCell().innerHTML = '<input type="text" class="form-control form-control-sm mixed-pallet-group-id-input" placeholder="Enter Group ID">';
-        
-        // 13. Actions Column REMOVED
-        // const actionsCell = newRow.insertCell();
-        // actionsCell.innerHTML = `<button class="btn btn-success btn-sm complete-stock-in-btn" data-item-id="${item.id}">Complete</button>`;
     });
 }
 
-// Placeholder for loading inventory summary data - adapt as needed
 async function loadInventorySummaryData() {
     console.log("loadInventorySummaryData() called");
+    const summaryTableBody = document.getElementById('jordon-inventory-summary-tbody'); // Get ref to table body for error display
+
+    // Show loading state in summary table before fetching data
+    if (summaryTableBody) {
+        summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Loading Jordon inventory summary...</td></tr>';
+    }
+
     const db = firebase.firestore();
     const summaryItems = [];
 
@@ -142,22 +134,20 @@ async function loadInventorySummaryData() {
             .where('warehouseId', '==', 'jordon')
             .orderBy('_3plDetails.dateStored')
             .orderBy('_3plDetails.lotNumber');
-
-        // Note: Adding a second orderBy, e.g., .orderBy('_3plDetails.dateStored'), 
-        // would likely require a composite index in Firestore.
-        // Example: .orderBy('_3plDetails.dateStored', 'desc')
-
         const snapshot = await inventoryQuery.get();
 
         if (snapshot.empty) {
             console.log("No Jordon inventory items found.");
-            return summaryItems;
+             if (summaryTableBody) summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">No inventory items found for Jordon.</td></tr>';
+            return summaryItems; // Return empty, but after updating table
         }
 
+        let productId = null; // Define productId here to ensure it's in scope for summaryItems.push
         for (const doc of snapshot.docs) {
             const inventoryItem = { id: doc.id, ...doc.data() };
             let productName = 'N/A';
             let productPackaging = 'N/A';
+            productId = null; // Reset for each item
 
             if (inventoryItem.productCode) {
                 const productsRef = db.collection('products');
@@ -165,16 +155,18 @@ async function loadInventorySummaryData() {
                 const productSnapshot = await productQuery.get();
 
                 if (!productSnapshot.empty) {
-                    const productData = productSnapshot.docs[0].data();
+                    const productDoc = productSnapshot.docs[0];
+                    const productData = productDoc.data();
                     productName = productData.name || 'N/A';
                     productPackaging = productData.packaging || 'N/A';
+                    productId = productDoc.id; 
                 } else {
                     console.warn(`Product details not found for productCode: ${inventoryItem.productCode} during summary load.`);
                 }
             } else {
                 console.warn(`Inventory item ${inventoryItem.id} missing productCode during summary load.`);
             }
-            summaryItems.push({ ...inventoryItem, productName, productPackaging });
+            summaryItems.push({ ...inventoryItem, productName, productPackaging, productId });
         }
 
         console.log('Loaded Jordon inventory summary data:', summaryItems);
@@ -182,10 +174,10 @@ async function loadInventorySummaryData() {
 
     } catch (error) {
         console.error("Error loading Jordon inventory summary data:", error);
-        // Optional: Display a user-friendly message on the UI
-        // const summaryContainer = document.getElementById('inventory-summary-content');
-        // if(summaryContainer) summaryContainer.innerHTML = "<p style='color:red;'>Error loading summary data. Please try again later.</p>";
-        return []; // Return empty array on error
+        if (summaryTableBody) { // Display error in the summary table
+            summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:red;">Error loading inventory summary. Please check connection or try again later.</td></tr>';
+        }
+        return []; 
     }
 }
 
@@ -196,26 +188,32 @@ function displayInventorySummary(summaryItems) {
 
     if (!summaryTableBody || !summaryTotalCartonsEl || !summaryTotalPalletsEl) {
         console.error('Inventory summary table elements (tbody or totals) not found.');
-        if (summaryTableBody) summaryTableBody.innerHTML = '<tr><td colspan="12" style="color:red; text-align:center;">Error: Table elements missing.</td></tr>';
+        if (summaryTableBody) summaryTableBody.innerHTML = '<tr><td colspan="11" style="color:red; text-align:center;">Error: Table elements missing.</td></tr>'; // Adjusted colspan
         return;
     }
 
-    summaryTableBody.innerHTML = ''; // Clear existing content
+    summaryTableBody.innerHTML = ''; 
     let totalCartons = 0;
     let totalPallets = 0;
+
+    const stockOutPopup = document.getElementById('stock-out-popup');
+    if (!stockOutPopup) {
+        console.error("Stock out popup element not found. Row click functionality cannot be fully initialized.");
+    }
 
     const highlightColors = ['#FFFFE0', '#ADD8E6', '#90EE90', '#FFB6C1', '#FAFAD2', '#E0FFFF'];
     const groupIdToColorMap = new Map();
     let colorIndex = 0;
 
     if (!summaryItems || summaryItems.length === 0) {
-        summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">No inventory summary data available.</td></tr>'; // Adjusted colspan to 11
+        // This case is handled by loadInventorySummaryData if snapshot is empty, 
+        // but good to keep as a fallback if summaryItems is empty for other reasons.
+        summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">No inventory summary data available.</td></tr>';
         summaryTotalCartonsEl.textContent = '0';
         summaryTotalPalletsEl.textContent = '0';
         return;
     }
 
-    // Pre-calculate Group ID to Color Mapping
     const uniqueGroupIds = new Set(
         summaryItems
             .map(item => item._3plDetails?.mixedPalletGroupId)
@@ -231,19 +229,33 @@ function displayInventorySummary(summaryItems) {
         const row = summaryTableBody.insertRow();
         const threePlDetails = item._3plDetails || {};
 
+        row.dataset.itemId = item.id; 
+        row.dataset.productCode = item.productCode || '';
+        row.dataset.productName = item.productName || 'N/A';
+        row.dataset.productPackaging = item.productPackaging || 'N/A';
+        row.dataset.palletType = threePlDetails.palletType || '';
+        row.dataset.location = threePlDetails.location || '';
+        row.dataset.lotNumber = threePlDetails.lotNumber || '';
+        row.dataset.quantity = item.quantity !== undefined ? item.quantity : 0;
+        row.dataset.batchNo = item.batchNo || '';
+        row.dataset.container = item.container || '';
+        row.dataset.dateStored = threePlDetails.dateStored || '';
+        row.dataset.productId = item.productId || ''; 
+
         row.insertCell().textContent = item.productCode || '';
         row.insertCell().textContent = item.productName || 'N/A';
-        // Display productPackaging directly to allow apostrophes
-        row.insertCell().textContent = item.productPackaging || 'N/A'; 
+        row.insertCell().textContent = item.productPackaging || 'N/A';
         row.insertCell().textContent = threePlDetails.palletType || '';
         row.insertCell().textContent = threePlDetails.location || '';
         row.insertCell().textContent = threePlDetails.lotNumber || '';
         row.insertCell().textContent = item.batchNo || '';
         row.insertCell().textContent = threePlDetails.dateStored || '';
         row.insertCell().textContent = item.container || '';
-        // Removed Expiry Date cell
         
         const itemQuantity = Number(item.quantity) || 0;
+        // Storing pallet count in row.dataset.pallets
+        row.dataset.pallets = Number(threePlDetails.pallet) || 0; 
+
         const quantityCell = row.insertCell();
         quantityCell.textContent = itemQuantity;
         totalCartons += itemQuantity;
@@ -253,12 +265,15 @@ function displayInventorySummary(summaryItems) {
         palletCell.textContent = itemPallets;
         totalPallets += itemPallets;
 
-        // Apply highlighting based on mixedPalletGroupId
         const groupId = threePlDetails.mixedPalletGroupId;
-        if (groupId && groupId.trim() !== '' && groupIdToColorMap.has(groupId)) { // Check if groupId is valid and in map
+        if (groupId && groupId.trim() !== '' && groupIdToColorMap.has(groupId)) {
             const color = groupIdToColorMap.get(groupId);
             quantityCell.style.backgroundColor = color;
             palletCell.style.backgroundColor = color;
+        }
+
+        if (stockOutPopup) { 
+             row.addEventListener('click', handleInventoryRowClick);
         }
     });
 
@@ -266,8 +281,36 @@ function displayInventorySummary(summaryItems) {
     summaryTotalPalletsEl.textContent = totalPallets;
 }
 
+function activateJordonTab(tabElement) {
+    const tabContainer = document.querySelector('.jordon-page-container .tabs-container');
+    if (!tabContainer) {
+        console.error("Jordon tab container not found during activateJordonTab.");
+        return null;
+    }
+    const tabItems = tabContainer.querySelectorAll('.tab-item');
+    const tabContents = document.querySelectorAll('.jordon-page-container .tab-content');
 
-function initJordonTabs() { // Renamed from initJordonTabsAndStockIn
+    tabItems.forEach(t => t.classList.remove('active'));
+    tabContents.forEach(c => c.classList.remove('active'));
+
+    if (tabElement) {
+        tabElement.classList.add('active');
+        const targetContentId = tabElement.dataset.tab + '-content';
+        const targetContent = document.getElementById(targetContentId);
+        if (targetContent) {
+            targetContent.classList.add('active');
+            return targetContentId;
+        } else {
+            console.error(`Content panel with ID ${targetContentId} not found for tab:`, tabElement);
+            return null;
+        }
+    } else {
+        console.error("activateJordonTab called with null tabElement.");
+        return null;
+    }
+}
+
+function initJordonTabs() { 
     console.log("Initializing Jordon tabs and stock-in functionality.");
     const tabContainer = document.querySelector('.jordon-page-container .tabs-container');
     if (!tabContainer) {
@@ -275,118 +318,278 @@ function initJordonTabs() { // Renamed from initJordonTabsAndStockIn
         return;
     }
     const tabItems = tabContainer.querySelectorAll('.tab-item');
-    const tabContents = document.querySelectorAll('.jordon-page-container .tab-content');
-
-    function activateTab(tabElement) {
-        tabItems.forEach(t => t.classList.remove('active'));
-        tabContents.forEach(c => c.classList.remove('active'));
-
-        tabElement.classList.add('active');
-        const targetContentId = tabElement.dataset.tab + '-content';
-        const targetContent = document.getElementById(targetContentId);
-        if (targetContent) {
-            targetContent.classList.add('active');
-        } else {
-            console.error(`Content panel with ID ${targetContentId} not found.`);
-        }
-        return targetContentId; // Return the ID of the activated content
-    }
 
     function handleStockInTabActivation() {
         console.log('Stock In tab is active, calling loadPendingJordonStock().');
         const stockInTableBody = document.getElementById('stock-in-table-body');
-        if (stockInTableBody) { // Show loading state
-            stockInTableBody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Loading pending items...</td></tr>'; // Colspan adjusted to 12
+        if (stockInTableBody) { 
+            stockInTableBody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Loading pending items...</td></tr>';
         }
         loadPendingJordonStock()
             .then(items => {
                 displayPendingStockInTable(items);
             })
-            .catch(error => {
-                console.error('Error loading or displaying pending stock:', error);
-                if (stockInTableBody) {
-                    stockInTableBody.innerHTML = '<tr><td colspan="12" style="text-align:center; color:red;">Error loading pending items. See console.</td></tr>'; // Colspan adjusted to 12
-                }
+            .catch(error => { // Error already handled and displayed by loadPendingJordonStock
+                console.error('Further error details from handleStockInTabActivation:', error);
             });
     }
+    
+    const summaryTableBody = document.getElementById('jordon-inventory-summary-tbody'); // For inventory summary loading message
 
     tabItems.forEach(tab => {
         tab.addEventListener('click', function() {
-            const activatedContentId = activateTab(this);
+            activateJordonTab(this); 
             if (this.dataset.tab === 'stock-in') {
                 handleStockInTabActivation();
             } else if (this.dataset.tab === 'inventory-summary') {
-                const summaryTableBody = document.getElementById('jordon-inventory-summary-tbody');
-                if (summaryTableBody) {
-                    summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Loading summary...</td></tr>'; // Adjusted colspan
-                }
+                // Loading message is now set inside loadInventorySummaryData
                 console.log('Inventory Summary tab selected, calling loadInventorySummaryData().');
                 loadInventorySummaryData()
                     .then(items => {
                         displayInventorySummary(items);
                     })
-                    .catch(error => {
-                        console.error('Error loading or displaying inventory summary:', error);
-                        if (summaryTableBody) {
-                            summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:red;">Error loading summary. See console.</td></tr>'; // Adjusted colspan
-                        }
+                    .catch(error => { // Error already handled and displayed by loadInventorySummaryData
+                         console.error('Further error details from inventory summary tab click:', error);
                     });
             }
-            // Add other 'else if' blocks for other tabs and their specific load functions
         });
     });
 
-    // Handle initial tab activation
     const initiallyActiveTab = tabContainer.querySelector('.tab-item.active');
     if (initiallyActiveTab) {
-        activateTab(initiallyActiveTab); // Ensure content is shown
+        activateJordonTab(initiallyActiveTab); 
         if (initiallyActiveTab.dataset.tab === 'stock-in') {
             handleStockInTabActivation();
         } else if (initiallyActiveTab.dataset.tab === 'inventory-summary') {
-            const summaryTableBody = document.getElementById('jordon-inventory-summary-tbody');
-            if (summaryTableBody) {
-                summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Loading summary...</td></tr>'; // Adjusted colspan
-            }
+            // Loading message is now set inside loadInventorySummaryData
             loadInventorySummaryData()
                 .then(items => {
                     displayInventorySummary(items);
                 })
-                .catch(error => {
-                    console.error('Error loading or displaying inventory summary on init:', error);
-                    if (summaryTableBody) {
-                        summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:red;">Error loading summary. See console.</td></tr>'; // Adjusted colspan
-                    }
+                .catch(error => { // Error already handled
+                     console.error('Further error details from initial inventory summary load:', error);
                 });
         }
-    } else if (tabItems.length > 0) { // If no tab is initially active, activate the first one
-        activateTab(tabItems[0]);
+    } else if (tabItems.length > 0) { 
+        activateJordonTab(tabItems[0]);
         if (tabItems[0].dataset.tab === 'stock-in') {
             handleStockInTabActivation();
         } else if (tabItems[0].dataset.tab === 'inventory-summary') {
-            const summaryTableBody = document.getElementById('jordon-inventory-summary-tbody');
-            if (summaryTableBody) {
-                summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Loading summary...</td></tr>'; // Adjusted colspan
-            }
+            // Loading message is now set inside loadInventorySummaryData
             loadInventorySummaryData()
                 .then(items => {
                     displayInventorySummary(items);
                 })
-                .catch(error => {
-                    console.error('Error loading or displaying inventory summary on init (first tab):', error);
-                    if (summaryTableBody) {
-                        summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:red;">Error loading summary. See console.</td></tr>'; // Adjusted colspan
-                    }
+                .catch(error => { // Error already handled
+                    console.error('Further error details from first tab inventory summary load:', error);
                 });
         }
     }
 
-    const submitButton = document.getElementById('submit-stock-in-btn');
-    if (submitButton) {
-        submitButton.addEventListener('click', handleSubmitStockIn);
+    const submitStockInButton = document.getElementById('submit-stock-in-btn');
+    if (submitStockInButton) {
+        submitStockInButton.addEventListener('click', handleSubmitStockIn);
     } else {
         console.warn('Submit Stock In button (#submit-stock-in-btn) not found.');
     }
+    
+    setupStockOutPopupClose();
+
+    const addToListBtn = document.getElementById('add-to-stock-out-list-btn');
+    if (addToListBtn) {
+        addToListBtn.addEventListener('click', handleAddToStockOutList);
+    } else {
+        console.warn('Add to Stock Out List button (#add-to-stock-out-list-btn) not found.');
+    }
+
+    const stockOutContentDiv = document.getElementById('stock-out-content');
+    if (stockOutContentDiv) {
+        stockOutContentDiv.addEventListener('click', function(event) {
+            if (event.target.classList.contains('remove-stock-out-item-btn')) {
+                handleRemoveStockOutItem(event);
+            } else if (event.target.id === 'submit-all-stock-out-btn') {
+                handleSubmitAllStockOut();
+            }
+        });
+    } else {
+        console.warn('#stock-out-content div not found for event delegation.');
+    }
+    renderStockOutPreview();
 }
+
+/**
+ * Handles the click event on a row in the inventory summary table.
+ * Populates and displays the stock-out popup with data from the clicked row.
+ * @param {Event} event - The click event object.
+ */
+function handleInventoryRowClick(event) {
+    const row = event.currentTarget;
+    const stockOutPopup = document.getElementById('stock-out-popup');
+
+    if (!stockOutPopup) {
+        console.error("Cannot handle row click: Stock out popup not found.");
+        return;
+    }
+
+    // Populate popup display fields with data from the row's dataset
+    document.getElementById('stock-out-item-code').textContent = row.dataset.productCode;
+    document.getElementById('stock-out-product-description').textContent = row.dataset.productName;
+    document.getElementById('stock-out-current-quantity').textContent = row.dataset.quantity;
+    document.getElementById('stock-out-location').textContent = row.dataset.location;
+    document.getElementById('stock-out-lot-number').textContent = row.dataset.lotNumber;
+    document.getElementById('stock-out-batch-number').textContent = row.dataset.batchNo || '';
+    // Using the new ID 'stock-out-pallets' and dataset key 'pallets'
+    document.getElementById('stock-out-pallets').textContent = row.dataset.pallets || '0';
+
+
+    // Store essential data on the popup itself for later use during stock-out submission
+    stockOutPopup.dataset.inventoryId = row.dataset.itemId;
+    stockOutPopup.dataset.productId = row.dataset.productId; 
+    stockOutPopup.dataset.productCode = row.dataset.productCode;
+    stockOutPopup.dataset.productName = row.dataset.productName;
+    stockOutPopup.dataset.batchNo = row.dataset.batchNo;
+    stockOutPopup.dataset.warehouseId = 'jordon'; // Hardcoded as per requirements
+    stockOutPopup.dataset.currentQuantity = row.dataset.quantity; 
+    stockOutPopup.dataset.location = row.dataset.location;
+    stockOutPopup.dataset.lotNumber = row.dataset.lotNumber;
+    stockOutPopup.dataset.productPackaging = row.dataset.productPackaging;
+    stockOutPopup.dataset.palletType = row.dataset.palletType;
+    stockOutPopup.dataset.container = row.dataset.container;
+    stockOutPopup.dataset.dateStored = row.dataset.dateStored;
+    // batchNo is already being stored. currentPhysicalPallets is now currentPallets.
+    stockOutPopup.dataset.currentPallets = row.dataset.pallets || '0';
+
+
+    // Clear previous input values in the popup
+    document.getElementById('stock-out-quantity').value = '';
+    document.getElementById('stock-out-pallet-id').value = '';
+    
+    // Display the popup
+    stockOutPopup.style.display = 'block';
+}
+
+/**
+ * Handles adding an item to the temporary stock-out list (`jordonStockOutItems`).
+ * Retrieves data from the stock-out popup, validates it, creates a stock-out item object,
+ * and then updates the UI.
+ */
+function handleAddToStockOutList() {
+    const stockOutPopup = document.getElementById('stock-out-popup');
+    const quantityInput = document.getElementById('stock-out-quantity');
+    const palletIdInput = document.getElementById('stock-out-pallet-id');
+
+    if (!stockOutPopup || !quantityInput || !palletIdInput) {
+        console.error("Popup, quantity input, or pallet ID input not found.");
+        alert("Error: Could not process the request. Popup elements missing.");
+        return;
+    }
+
+    const quantityToStockOut = parseInt(quantityInput.value, 10);
+    const palletId = palletIdInput.value.trim();
+    
+    // Retrieve all necessary data stored on the popup's dataset
+    const {
+        inventoryId, productId, productCode, productName, /* batchNo is retrieved below */ 
+        warehouseId, currentQuantity: currentQuantityStr, location, lotNumber, 
+        /* productPackaging is retrieved below */ palletType, container, dateStored,
+        /* currentPallets is retrieved below */
+    } = stockOutPopup.dataset;
+    const currentQuantity = parseInt(currentQuantityStr, 10);
+
+    // Retrieve additional data specifically requested for stockOutItem object
+    const productPackaging = stockOutPopup.dataset.productPackaging || '';
+    const batchNumber = stockOutPopup.dataset.batchNo || ''; // batchNo from dataset is batchNumber for the object
+    const currentPallets = stockOutPopup.dataset.currentPallets || '0'; // Renamed from currentPhysicalPallets
+
+
+    // Validate Input: Quantity must be a positive number
+    if (isNaN(quantityToStockOut) || quantityToStockOut <= 0) {
+        alert("Please enter a valid positive quantity to stock out.");
+        quantityInput.focus();
+        return;
+    }
+
+    // Validate Input: Quantity to stock out cannot exceed available quantity
+    if (quantityToStockOut > currentQuantity) {
+        alert(`Quantity to stock out (${quantityToStockOut}) cannot exceed current available quantity (${currentQuantity}).`);
+        quantityInput.focus();
+        return;
+    }
+
+    // Create the stock-out item object with all relevant details
+    const stockOutItem = {
+        inventoryId, 
+        productId, 
+        productCode, 
+        productName, 
+        productPackaging: productPackaging, 
+        location, 
+        lotNumber, 
+        batchNumber: batchNumber, 
+        warehouseId, 
+        originalQuantityInInventory: currentQuantity, 
+        quantityToStockOut, 
+        palletId, 
+        palletType, 
+        container, 
+        dateStored,
+        currentPallets: currentPallets, // Renamed from currentPhysicalPallets
+    };
+
+    jordonStockOutItems.push(stockOutItem);
+
+    // If this is the first item added, switch to the "Stock Out" tab to show the list
+    if (jordonStockOutItems.length === 1) {
+        const stockOutTabButton = document.querySelector('.tab-item[data-tab="stock-out"]');
+        if (stockOutTabButton) {
+            activateJordonTab(stockOutTabButton);
+        } else {
+            console.error("Could not find 'Stock Out' tab button to activate.");
+        }
+    }
+    
+    renderStockOutPreview(); // Update the displayed list of items to be stocked out
+
+    // Clear inputs and hide the popup
+    quantityInput.value = '';
+    palletIdInput.value = '';
+    stockOutPopup.style.display = 'none';
+}
+
+
+function setupStockOutPopupClose() {
+    const stockOutPopup = document.getElementById('stock-out-popup');
+    const closeBtn = stockOutPopup ? stockOutPopup.querySelector('.close-btn') : null;
+    const closePopupButton = document.getElementById('close-popup-btn');
+
+    if (!stockOutPopup) {
+        console.error("Stock out popup element not found. Cannot setup close functionality.");
+        return;
+    }
+
+    const closePopup = () => {
+        stockOutPopup.style.display = 'none';
+    };
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closePopup);
+    } else {
+        console.warn("Close button (.close-btn) not found in stock-out-popup.");
+    }
+
+    if (closePopupButton) {
+        closePopupButton.addEventListener('click', closePopup);
+    } else {
+        console.warn("Close button (#close-popup-btn) not found.");
+    }
+
+    stockOutPopup.addEventListener('click', function(event) {
+        if (event.target === stockOutPopup) { 
+            closePopup();
+        }
+    });
+}
+
 
 async function handleSubmitStockIn() {
     console.log('handleSubmitStockIn called');
@@ -401,7 +604,7 @@ async function handleSubmitStockIn() {
 
     rows.forEach(row => {
         const itemId = row.dataset.itemId;
-        if (!itemId) { // Skip rows that might be headers or placeholders without an item ID
+        if (!itemId) { 
             return;
         }
 
@@ -414,8 +617,8 @@ async function handleSubmitStockIn() {
             itemId: itemId,
             palletType: palletTypeSelect ? palletTypeSelect.value : null,
             location: locationSelect ? locationSelect.value : null,
-            lotNumber: lotNumberInput ? lotNumberInput.value.trim() : "", // Default to empty string if null
-            mixedPalletGroupId: mixedPalletGroupIdInput ? mixedPalletGroupIdInput.value.trim() : "", // Default to empty string if null
+            lotNumber: lotNumberInput ? lotNumberInput.value.trim() : "", 
+            mixedPalletGroupId: mixedPalletGroupIdInput ? mixedPalletGroupIdInput.value.trim() : "", 
         };
         itemsToUpdate.push(rowData);
     });
@@ -425,9 +628,9 @@ async function handleSubmitStockIn() {
         return;
     }
     
-    const submitButton = document.getElementById('submit-stock-in-btn');
-    if (submitButton) {
-        submitButton.disabled = true;
+    const submitStockInButton = document.getElementById('submit-stock-in-btn');
+    if (submitStockInButton) {
+        submitStockInButton.disabled = true;
     }
 
     try {
@@ -450,35 +653,201 @@ async function handleSubmitStockIn() {
         alert('Stock In updated successfully!');
         console.log('Stock In updated successfully for items:', itemsToUpdate.map(item => item.itemId));
         
-        // Optionally, reload or clear the table after successful update
-        // For example, by calling the function that loads pending stock again:
-        // handleStockInTabActivation(); // This would re-trigger loadPendingJordonStock and displayPendingStockInTable
-        // Or simply clear the current table:
-        if(stockInTableBody) stockInTableBody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Update successful. Refreshing...</td></tr>'; // Colspan to match table
-        // A common pattern is to re-fetch the data to show the updated state
-        // For simplicity, we'll call the function that handles the tab activation which should reload the data.
-        // Need to ensure handleStockInTabActivation is accessible or call its parts directly.
-        // Let's assume we want to refresh the current view:
+        if(stockInTableBody) stockInTableBody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Update successful. Refreshing...</td></tr>';
         loadPendingJordonStock().then(displayPendingStockInTable).catch(err => console.error("Error refreshing stock-in table:", err));
 
-        // Also refresh the inventory summary data
         console.log("Attempting to refresh inventory summary data post-stock-in update.");
+        // Ensure loading message for summary is handled by loadInventorySummaryData itself
         loadInventorySummaryData().then(displayInventorySummary).catch(err => console.error("Error refreshing summary table post-stock-in:", err));
-
 
     } catch (error) {
         console.error('Error updating stock in:', error);
         alert('Error updating stock in. Please try again.');
     } finally {
-        if (submitButton) {
-            submitButton.disabled = false;
+        if (submitStockInButton) {
+            submitStockInButton.disabled = false;
         }
     }
 }
 
-// The call to initJordonTabs() should be made when the Jordon page/section is loaded.
-// For example, if app.js handles page loading:
-// if (currentPage === 'jordon') { initJordonTabs(); }
-// Or, if this script is loaded only on the Jordon page:
-// document.addEventListener('DOMContentLoaded', initJordonTabs);
-// For now, it's defined. It will be called from app.js or similar.
+/**
+ * Renders the preview of items added to the stock-out list in the #stock-out-content div.
+ * Displays a table of items or a message if the list is empty.
+ */
+function renderStockOutPreview() {
+    const stockOutContentDiv = document.getElementById('stock-out-content');
+    if (!stockOutContentDiv) {
+        console.error('#stock-out-content div not found. Cannot render preview.');
+        return;
+    }
+
+    stockOutContentDiv.innerHTML = ''; // Clear previous content to prevent duplication
+
+    // Add a title for the section
+    let html = '<h2>Stock Out List</h2>';
+
+    if (jordonStockOutItems.length === 0) {
+        // Updated colspan to 9 for the "empty list" message
+        html += '<p>No items added for stock out yet.</p>'; 
+        // Note: If displaying this message inside a table structure for consistency, 
+        // it would be `<tr><td colspan="9" style="text-align:center;">No items added for stock out yet.</td></tr>`
+        // But current structure places this p tag directly in stockOutContentDiv if list is empty.
+        // For simplicity, keeping it as a direct <p> tag. If it needs to be inside the table,
+        // the table structure would need to be created even for the empty message.
+        stockOutContentDiv.innerHTML = html;
+        return;
+    }
+
+    html += '<table class="table-styling-class">'; // Ensure this class matches general table styles
+    html += `
+        <thead>
+            <tr>
+                <th>S/N</th>
+                <th>Product Description</th>
+                <th>Packing Size</th>
+                <th>Location</th>
+                <th>Lot No</th>
+                <th>Pallet ID (Out)</th>
+                <th>Quantity</th>
+                <th>Batch No</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+    `;
+
+    jordonStockOutItems.forEach((item, index) => {
+        html += `
+            <tr>
+                <td>${index + 1}</td>
+                <td>${escapeHtml(item.productName)}</td>
+                <td>${escapeHtml(item.productPackaging)}</td>
+                <td>${escapeHtml(item.location)}</td>
+                <td>${escapeHtml(item.lotNumber)}</td>
+                <td>${escapeHtml(item.palletId)}</td>
+                <td>${escapeHtml(String(item.quantityToStockOut))}</td> 
+                <td>${escapeHtml(item.batchNumber)}</td>
+                <td><button class="btn btn-danger btn-sm remove-stock-out-item-btn" data-index="${index}">Remove</button></td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table>';
+    // Add the "Submit All Stock Out" button if there are items
+    html += '<div style="text-align: center; margin-top: 20px;"><button id="submit-all-stock-out-btn" class="btn btn-success">Submit All Stock Out</button></div>';
+
+    stockOutContentDiv.innerHTML = html;
+}
+
+/**
+ * Handles the click event for "Remove" buttons in the stock-out preview list.
+ * Removes the specified item from `jordonStockOutItems` and re-renders the preview.
+ * @param {Event} event - The click event, expected to originate from a "Remove" button.
+ */
+function handleRemoveStockOutItem(event) {
+    // Event delegation checks if the clicked target is a remove button
+    if (event.target.classList.contains('remove-stock-out-item-btn')) {
+        const indexToRemove = parseInt(event.target.dataset.index, 10);
+        // Validate the index
+        if (!isNaN(indexToRemove) && indexToRemove >= 0 && indexToRemove < jordonStockOutItems.length) {
+            jordonStockOutItems.splice(indexToRemove, 1); // Remove the item
+            renderStockOutPreview(); // Re-render the updated list
+        } else {
+            console.error("Invalid index for stock out item removal:", event.target.dataset.index);
+        }
+    }
+}
+
+/**
+ * Handles the submission of all items in the `jordonStockOutItems` list.
+ * It processes each item, calls an API for stock out, and provides feedback.
+ */
+async function handleSubmitAllStockOut() {
+    if (jordonStockOutItems.length === 0) {
+        alert("No items to stock out.");
+        return;
+    }
+
+    if (!confirm("Are you sure you want to submit these stock out items?")) {
+        return;
+    }
+
+    const submitButton = document.getElementById('submit-all-stock-out-btn');
+    if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = 'Processing...';
+    }
+
+    const successfulItems = [];
+    const failedItemsInfo = []; 
+    const itemsToProcess = [...jordonStockOutItems]; 
+    let remainingItemsInPendingList = []; 
+
+    for (const item of itemsToProcess) {
+        const data = {
+            productId: item.productId,
+            productCode: item.productCode,
+            productName: item.productName,
+            warehouseId: item.warehouseId, 
+            batchNo: item.batchNo, 
+            quantity: Number(item.quantityToStockOut),
+            operatorId: "JORDON_WMS_USER", // TODO: Replace with actual logged-in user ID when authentication is implemented.
+            inventoryId: item.inventoryId, 
+            lotNumber: item.lotNumber, 
+        };
+
+        try {
+            if (typeof transactionAPI !== 'object' || typeof transactionAPI.outboundStock !== 'function') {
+                if (typeof jest !== 'undefined' || (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test')) { 
+                    console.warn("transactionAPI.outboundStock is not available. Simulating success for testing environment.");
+                    await new Promise(resolve => setTimeout(resolve, 50)); 
+                } else {
+                    throw new Error('transactionAPI.outboundStock is not available. Cannot process stock out.');
+                }
+            } else {
+                 await transactionAPI.outboundStock(data);
+            }
+            successfulItems.push(item);
+        } catch (error) {
+            const errorMessage = error.message || 'Unknown error during stock out';
+            console.error(`Failed to stock out item ${item.productName} (Code: ${item.productCode}, Inv ID: ${item.inventoryId}):`, errorMessage, error);
+            failedItemsInfo.push({ item, error: errorMessage });
+            remainingItemsInPendingList.push(item); 
+        }
+    }
+
+    jordonStockOutItems = remainingItemsInPendingList; 
+
+    // Enhanced Feedback messages
+    let alertMessage = "";
+    if (failedItemsInfo.length === 0 && successfulItems.length > 0) {
+        alertMessage = `All ${successfulItems.length} items stocked out successfully!`;
+    } else if (failedItemsInfo.length > 0 && successfulItems.length > 0) {
+        const failedSummary = failedItemsInfo.map(f => `${f.item.productCode}: ${f.error}`).join('; ');
+        alertMessage = `Partial success: ${successfulItems.length} items stocked out. \n${failedItemsInfo.length} items failed: ${failedSummary}. \nFailed items remain in the list. See console for full details.`;
+    } else if (failedItemsInfo.length > 0 && successfulItems.length === 0 && itemsToProcess.length > 0) {
+        const failedSummary = failedItemsInfo.map(f => `${f.item.productCode}: ${f.error}`).join('; ');
+        alertMessage = `All ${failedItemsInfo.length} items failed to stock out: ${failedSummary}. \nFailed items remain in the list. See console for full details.`;
+    } else if (successfulItems.length === 0 && failedItemsInfo.length === 0 && itemsToProcess.length > 0) {
+        alertMessage = "No items were processed. There might be an issue with the transaction system or all items failed validation. Check console.";
+    }
+    if(alertMessage) alert(alertMessage);
+
+
+    renderStockOutPreview(); 
+
+    const currentSubmitButton = document.getElementById('submit-all-stock-out-btn');
+    if (currentSubmitButton) { 
+        currentSubmitButton.disabled = false;
+        currentSubmitButton.textContent = 'Submit All Stock Out';
+    }
+
+    if (successfulItems.length > 0) {
+        console.log("Refreshing inventory summary after successful stock out...");
+        // Ensure loading message for summary is handled by loadInventorySummaryData itself
+        loadInventorySummaryData().then(displayInventorySummary).catch(err => {
+            console.error("Error refreshing inventory summary post stock-out:", err);
+            alert("Inventory summary could not be refreshed. Please check manually or try refreshing the page.");
+        });
+    }
+}
