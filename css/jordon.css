@@ -1,1 +1,162 @@
+/* Basic styles for the stock out popup */
+#stock-out-popup {
+  display: none; /* Hidden by default */
+  position: fixed; /* Stay in place */
+  z-index: 1000; /* Sit on top */
+  left: 0;
+  top: 0;
+  width: 100%; /* Full width */
+  height: 100%; /* Full height */
+  overflow: auto; /* Enable scroll if needed */
+  background-color: rgba(0, 0, 0, 0.5); 
+  padding-top: 50px; 
+}
+
+.popup-content {
+  background-color: #f8f9fa; 
+  margin: 5% auto;
+  padding: 25px;
+  border: 1px solid #dee2e6; 
+  width: 90%; 
+  max-width: 600px; 
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15); 
+  border-radius: 8px; 
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
+}
+
+.close-btn {
+  color: #6c757d; 
+  float: right;
+  font-size: 30px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.close-btn:hover,
+.close-btn:focus {
+  color: #343a40; 
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* New styles for info display */
+.popup-info-line {
+  display: flex;
+  align-items: baseline; /* Aligns label text and value text along their baseline */
+  margin-bottom: 0.85rem; /* Spacing between each info line */
+}
+
+.popup-label {
+  font-weight: 600; 
+  color: #495057;
+  margin-right: 0.5rem; /* Space between label and value */
+  flex-shrink: 0; /* Prevents the label from shrinking */
+  /* Consider a fixed width if all labels should align vertically, e.g., width: 180px; */
+  /* For now, natural width based on content */
+}
+
+/* Adjusted Style for display value spans */
+/* This targets spans like id="stock-out-item-code", etc. */
+#stock-out-popup .popup-content .popup-info-section span[id^="stock-out-"] {
+  display: inline; /* Ensures underline only covers the text content */
+  /* padding-top: 2px; Removed, baseline alignment should handle this */
+  padding-bottom: 4px; /* Space for the underline */
+  background-color: transparent; 
+  border: none; 
+  border-bottom: 1px solid #dee2e6; 
+  border-radius: 0; 
+  margin-bottom: 0; /* Margin is now on .popup-info-line */
+  min-height: auto; 
+  font-weight: bold; /* Make value text bold */
+  color: #212529; 
+  /* flex-grow: 1; Removed to prevent underline stretching */
+  word-break: break-word; /* Prevent long unbroken strings from overflowing */
+}
+
+/* Remove obsolete styles for old p/strong structure if they were very specific */
+/* The generic #stock-out-popup .popup-content strong styling might still be useful if strong is used elsewhere,
+   but #stock-out-popup .popup-content div:first-of-type p is no longer relevant for this section. */
+/* Removing the specific one related to the old p structure */
+#stock-out-popup .popup-content div:first-of-type p {
+    /* This selector is now obsolete for the info lines */
+    margin-bottom: 0; /* Override if it had specific values */
+}
+/* The general strong styling can remain for now or be removed if not used elsewhere in popup */
+/* #stock-out-popup .popup-content strong { ... } */
+
+
+/* Style for input field labels */
+#stock-out-popup label {
+  display: block;
+  margin-top: 15px; 
+  margin-bottom: 5px; 
+  font-weight: 600; 
+  color: #343a40; 
+}
+
+/* Style for input fields */
+#stock-out-popup input[type="number"],
+#stock-out-popup input[type="text"] {
+  width: 100%; 
+  padding: 10px 12px; 
+  margin-top: 0; 
+  margin-bottom: 15px;
+  border: 1px solid #ced4da; 
+  border-radius: 4px;
+  box-sizing: border-box; 
+  font-size: 16px;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+#stock-out-popup input[type="number"]:focus,
+#stock-out-popup input[type="text"]:focus {
+  border-color: #80bdff; 
+  outline: 0;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.popup-buttons {
+    text-align: right; 
+    margin-top: 20px; 
+    padding-top: 15px; 
+    border-top: 1px solid #e0e0e0; 
+}
+
+#stock-out-popup button {
+  color: white;
+  padding: 10px 18px; 
+  margin-left: 8px; 
+  border: none;
+  border-radius: 5px; 
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 500;
+  transition: background-color 0.2s ease-in-out, transform 0.1s ease; 
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+#stock-out-popup button:hover {
+  opacity: 0.9; 
+  transform: translateY(-1px); 
+}
+
+#stock-out-popup button#add-to-stock-out-list-btn {
+  background-color: #28a745; 
+}
+#stock-out-popup button#add-to-stock-out-list-btn:hover {
+  background-color: #218838; 
+}
+
+#stock-out-popup button#close-popup-btn {
+  background-color: #6c757d; 
+}
+#stock-out-popup button#close-popup-btn:hover {
+  background-color: #5a6268;
+}
+
+.popup-content::after {
+  content: "";
+  clear: both;
+  display: table;
+}
 
