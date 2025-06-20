@@ -83,8 +83,15 @@
     </div>
     <div class="tab-content" id="stock-out-content">
       <h2>Stock Out</h2>
-      <p>Content for Stock Out will go here.</p>
-      <!-- Add more specific content structure as needed -->
+      <div id="stock-out-controls" style="padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; background-color: #f9f9f9;">
+        <label for="withdraw-date" style="margin-right: 5px;">Withdraw Date:</label>
+        <input type="date" id="withdraw-date" style="margin-right: 15px;">
+        <label for="collection-time" style="margin-right: 5px;">Collection Time:</label>
+        <input type="text" id="collection-time" placeholder="HH:MM AM/PM">
+      </div>
+      <div id="stock-out-list-container">
+        <!-- Stock out list table will be rendered here by js/jordon.js -->
+      </div>
     </div>
     <div class="tab-content" id="report-content">
       <h2>Report</h2>
