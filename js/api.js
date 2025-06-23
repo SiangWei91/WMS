@@ -250,38 +250,219 @@ window.transactionAPI = {
         return { transactionId: transactionRef.id, status: "success" };
     },
 
-    async outboundStock(data) {
+    async outboundStock(data) { // This function remains for general purpose outbound stock
         const inventoryQuery = window.db.collection('inventory')
-            .where('productId', '==', data.productId) 
+            .where('productId', '==', data.productId)
             .where('warehouseId', '==', data.warehouseId)
-            .where('batchNo', '==', data.batchNo || null);
+            .where('batchNo', '==', data.batchNo || null); // Ensure batchNo comparison is correct
         const inventorySnapshot = await inventoryQuery.limit(1).get();
+
         if (inventorySnapshot.empty) {
-            throw new Error(`Stock not found for Product ID: ${data.productId}, Batch: ${data.batchNo || 'N/A'} in Warehouse: ${data.warehouseId}.`);
+            throw new Error(`Stock not found for Product ID: ${data.productId}, Product Code: ${data.productCode}, Batch: ${data.batchNo || 'N/A'} in Warehouse: ${data.warehouseId}.`);
         }
         const inventoryDoc = inventorySnapshot.docs[0];
         const currentQuantity = inventoryDoc.data().quantity;
         const outboundQuantity = Number(data.quantity);
+
         if (currentQuantity < outboundQuantity) {
-            throw new Error(`Insufficient stock for Product ID: ${data.productId}, Batch: ${data.batchNo || 'N/A'}. Available: ${currentQuantity}, Requested: ${outboundQuantity}.`);
+            throw new Error(`Insufficient stock for Product ID: ${data.productId}, Product Code: ${data.productCode}, Batch: ${data.batchNo || 'N/A'}. Available: ${currentQuantity}, Requested: ${outboundQuantity}.`);
         }
+
         const batch = window.db.batch();
-        const transactionRef = window.db.collection('transactions').doc(); 
+        const transactionRef = window.db.collection('transactions').doc();
         batch.set(transactionRef, {
             type: "outbound",
             productId: data.productId,
-            productCode: data.productCode, 
-            productName: data.productName, 
+            productCode: data.productCode,
+            productName: data.productName,
             warehouseId: data.warehouseId,
             batchNo: data.batchNo || null,
             quantity: outboundQuantity,
-            operatorId: data.operatorId,
-            transactionDate: firebase.firestore.FieldValue.serverTimestamp()
+            operatorId: data.operatorId, // Make sure this is passed in `data`
+            transactionDate: firebase.firestore.FieldValue.serverTimestamp(),
+            relatedInventoryId: inventoryDoc.id // Store related inventory ID for traceability
         });
+
         batch.update(inventoryDoc.ref, {
             quantity: firebase.firestore.FieldValue.increment(-outboundQuantity),
             lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
         });
+
+        await batch.commit();
+        return { transactionId: transactionRef.id, status: "success", inventoryId: inventoryDoc.id };
+    },
+
+    async outboundStockByInventoryId(data) {
+        // data should include: inventoryId, quantityToDecrement, productCode, productName, operatorId, palletsToDecrement
+        const inventoryDocRef = window.db.collection('inventory').doc(data.inventoryId);
+        const db = firebase.firestore(); 
+
+        return db.runTransaction(async (transaction) => {
+            const inventoryDoc = await transaction.get(inventoryDocRef);
+            if (!inventoryDoc.exists) {
+                throw new Error(`Inventory item with ID ${data.inventoryId} not found.`);
+            }
+
+            const currentItemData = inventoryDoc.data();
+            const currentQuantity = currentItemData.quantity;
+            const quantityToDecrement = Number(data.quantityToDecrement);
+
+            // Validate carton quantity
+            if (isNaN(quantityToDecrement) || quantityToDecrement < 0) { // Ensure non-negative, allows 0 if only pallets are moved (though unlikely)
+                throw new Error("Quantity to decrement must be a non-negative number.");
+            }
+            if (currentQuantity < quantityToDecrement) {
+                throw new Error(`Insufficient carton stock for inventory item ${data.inventoryId} (${currentItemData.productCode}). Available: ${currentQuantity}, Requested: ${quantityToDecrement}.`);
+            }
+
+            // Prepare for pallet quantity validation and deduction if applicable (Jordon items)
+            let palletsToDecrementNum = 0;
+            let currentPallets = 0;
+            let newPalletCount = 0; // Will hold the calculated new pallet count for Jordon items
+
+            if (currentItemData.warehouseId === 'jordon') {
+                currentPallets = (currentItemData._3plDetails && currentItemData._3plDetails.pallet !== undefined)
+                                ? Number(currentItemData._3plDetails.pallet)
+                                : 0;
+                // Ensure data.palletsToDecrement is treated as a number, default to 0 if not provided or invalid
+                palletsToDecrementNum = (data.palletsToDecrement !== undefined && !isNaN(Number(data.palletsToDecrement))) 
+                                      ? Number(data.palletsToDecrement) 
+                                      : 0;
+
+                if (palletsToDecrementNum < 0) { // Already validated in handleAddToStockOutList, but good to be safe
+                    throw new Error(`Invalid pallet quantity to decrement (${data.palletsToDecrement}). Must be a non-negative number.`);
+                }
+                if (palletsToDecrementNum > currentPallets) { // Also validated earlier
+                    throw new Error(`Insufficient pallet stock for Jordon item ${data.inventoryId}. Available: ${currentPallets}, Requested: ${palletsToDecrementNum}.`);
+                }
+                newPalletCount = currentPallets - palletsToDecrementNum;
+            }
+
+            // Product ID determination for logging
+            let effectiveProductId = data.productId; 
+            const inventoryProductId = currentItemData.productId; 
+            if (!effectiveProductId && inventoryProductId) {
+                effectiveProductId = inventoryProductId;
+                // console.warn for discrepancies can be re-added if needed
+            } else if (!inventoryProductId && !effectiveProductId) { // If both are missing
+                 console.warn(`Transaction Log for ${data.inventoryId}: productId is missing from both input data and inventory document. This indicates a data integrity issue.`);
+            }
+            // If effectiveProductId is still falsy after these checks, it will cause an error in transaction.set if required by rules
+            if (!effectiveProductId) {
+                throw new Error(`Cannot log transaction for inventory ID ${data.inventoryId}: effectiveProductId is undefined/null. Please ensure the inventory item and product data are correctly linked.`);
+            }
+            
+            // Log the transaction
+            const transactionLogRef = db.collection('transactions').doc();
+            const logData = {
+                type: "outbound",
+                inventoryId: data.inventoryId, 
+                productId: effectiveProductId, 
+                productCode: currentItemData.productCode || data.productCode, 
+                productName: currentItemData.productName || data.productName, 
+                warehouseId: currentItemData.warehouseId, 
+                batchNo: currentItemData.batchNo || null, 
+                quantity: quantityToDecrement, // Log carton quantity decremented
+                operatorId: data.operatorId,
+                transactionDate: firebase.firestore.FieldValue.serverTimestamp(),
+                description: `Stock out for transfer. Inventory ID: ${data.inventoryId}`
+            };
+            if (currentItemData.warehouseId === 'jordon') {
+                logData.palletsDecremented = palletsToDecrementNum; // Log pallet quantity decremented
+            }
+            transaction.set(transactionLogRef, logData);
+
+            // Prepare inventory update payload
+            const newQuantity = currentQuantity - quantityToDecrement;
+            const updatePayload = {
+                quantity: newQuantity,
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            };
+
+            if (currentItemData.warehouseId === 'jordon') {
+                // Ensure _3plDetails structure exists if we are about to write to its pallet subfield
+                if (!currentItemData._3plDetails && palletsToDecrementNum >= 0) { // palletsToDecrementNum will be 0 if not provided
+                    updatePayload._3plDetails = { pallet: newPalletCount };
+                } else if (currentItemData._3plDetails || palletsToDecrementNum >= 0) { // If _3plDetails exists or we need to set pallet
+                    updatePayload['_3plDetails.pallet'] = newPalletCount;
+                }
+                
+                console.log(`Jordon item ${data.inventoryId}: Cartons ${currentQuantity}->${newQuantity}. Pallets ${currentPallets}->${newPalletCount}. (Decrement requested: ${palletsToDecrementNum} pallets)`);
+
+                // Safeguard: If all cartons are gone, pallets must be zero.
+                // This overrides the calculation if, for instance, user said 0 pallets out but took all cartons.
+                if (newQuantity === 0 && updatePayload['_3plDetails.pallet'] !== 0) {
+                    console.warn(`Jordon item ${data.inventoryId}: All cartons depleted. Forcing _3plDetails.pallet to 0 (was calculated as ${updatePayload['_3plDetails.pallet']}).`);
+                    if (!updatePayload._3plDetails) updatePayload._3plDetails = {};
+                    updatePayload['_3plDetails.pallet'] = 0;
+                }
+            }
+            transaction.update(inventoryDocRef, updatePayload);
+
+            return { transactionId: transactionLogRef.id, status: "success", inventoryId: data.inventoryId };
+        });
+    },
+
+    // Reviewing inboundStock: It seems generally suitable.
+    // It creates a new inventory record if one doesn't exist for the product/warehouse/batch,
+    // or increments quantity if it does. This is the desired behavior for the destination warehouse.
+    // We need to ensure all necessary data (productId, productCode, productName, warehouseId, batchNo, quantity, operatorId)
+    // is correctly passed from handleSubmitAllStockOut.
+    async inboundStock(data) { // data: productId, productCode, productName, warehouseId, batchNo, quantity, operatorId, expiryDate (optional)
+        const db = window.db; // or firebase.firestore()
+        const batch = db.batch();
+        const transactionRef = db.collection('transactions').doc();
+
+        batch.set(transactionRef, {
+            type: "inbound",
+            productId: data.productId,
+            productCode: data.productCode,
+            productName: data.productName,
+            warehouseId: data.warehouseId, // Destination warehouse
+            batchNo: data.batchNo || null,
+            quantity: Number(data.quantity),
+            operatorId: data.operatorId,
+            transactionDate: firebase.firestore.FieldValue.serverTimestamp(),
+            description: `Stock in to ${data.warehouseId} from Jordon transfer.`
+        });
+
+        const inventoryQuery = db.collection('inventory')
+            .where('productId', '==', data.productId)
+            .where('warehouseId', '==', data.warehouseId)
+            .where('batchNo', '==', data.batchNo || null); // Ensure batchNo comparison is correct
+
+        const inventorySnapshot = await inventoryQuery.limit(1).get();
+
+        if (!inventorySnapshot.empty) {
+            const inventoryDocRef = inventorySnapshot.docs[0].ref;
+            batch.update(inventoryDocRef, {
+                quantity: firebase.firestore.FieldValue.increment(Number(data.quantity)),
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+                // Optionally update other fields if they can change, e.g., productName, though less likely for existing stock
+                productName: data.productName, // Ensure product name is consistent
+                productCode: data.productCode  // Ensure product code is consistent
+            });
+        } else {
+            const newInventoryRef = db.collection('inventory').doc();
+            // Ensure all necessary fields for a new inventory item are present in `data`
+            // or fetched/derived if necessary.
+            // For a transfer, core product details should remain the same.
+            // _3plDetails might need to be considered if the destination warehouse also uses it.
+            // For now, keeping it simple for the transferred item.
+            batch.set(newInventoryRef, {
+                productId: data.productId,
+                productCode: data.productCode,
+                productName: data.productName,
+                warehouseId: data.warehouseId, // Destination warehouse
+                batchNo: data.batchNo || null,
+                quantity: Number(data.quantity),
+                // expiryDate: data.expiryDate ? new Date(data.expiryDate) : null, // If expiry is tracked
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+                // Add any other relevant fields for a new inventory record in the destination.
+                // For example, if the destination uses _3plDetails, it might need default values.
+                // _3plDetails: { location: 'default_location', status: 'Complete', palletType: 'N/A' } // Example
+            });
+        }
         await batch.commit();
         return { transactionId: transactionRef.id, status: "success" };
     }
