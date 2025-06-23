@@ -52,13 +52,12 @@ function generatePrintableStockOutHTML(formData) {
             <tr>
                 <td>${escapeHtml(index + 1)}</td>
                 <td>${escapeHtml(item.productName)}</td>
-                <td>${escapeHtml(item.productPackaging)}</td>
+                <td style="font-size: 9pt;">${escapeHtml(item.productPackaging)}</td> <!-- Smaller packing size font -->
                 <td>${escapeHtml(item.location)}</td>
                 <td>${escapeHtml(item.lotNumber)}</td>
                 <td>${escapeHtml(item.palletId)}</td> 
                 <td>${escapeHtml(item.quantityToStockOut)}</td>
                 <td>${escapeHtml(item.batchNumber)}</td>
-                <td>${escapeHtml(item.destinationWarehouseName)}</td>
             </tr>
         `;
     });
@@ -71,85 +70,148 @@ function generatePrintableStockOutHTML(formData) {
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Jordon Withdraw Form - ${escapeHtml(serialNumber)}</title>
             <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                h1 { text-align: center; font-size: 14pt; margin-top: 20px; margin-bottom:20px; }
-                hr { border: none; border-top: 1px solid #000; }
-                /* .info-header class is not explicitly used in the new top section, but keeping if other elements might use it */
-                .info-header { margin-bottom: 20px; text-align: center; } 
-                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                th { background-color: #f2f2f2; font-size: 10pt; } /* TH font size can remain 10pt or match TD */
-                th, td { border: 1px solid #000; padding: 8px; text-align: left; }
-                td { font-size: 9pt; } /* TD font size set to 9pt */
-                .withdraw-date-styled { font-weight: bold; font-size: 11pt; }
-                @media print {
-                    body { margin: 0.5in; } /* Adjust print margins */
-                    .no-print { display: none; } /* Class for elements to hide during print */
+                @page { size: A4; margin: 0; }
+                body { 
+                    font-family: Arial, sans-serif; 
+                    font-size: 12pt; 
+                    margin: 0; 
+                    line-height: 1.3;
+                }
+                .content {
+                    margin: 30px;
+                }
+                table { 
+                    border-collapse: collapse; 
+                    width: 100%; 
+                    margin-top: 20px; 
+                    margin-bottom: 20px;
+                    font-size: 10pt; /* Smaller font size for table */
+                }
+                th, td { 
+                    border: 1px solid black; 
+                    padding: 6px; /* Reduced padding for smaller text */
+                    text-align: left; 
+                }
+                th { 
+                    background-color: #f2f2f2; 
+                    font-size: 10pt; /* Match header font size with table */
+                }
+                .header { margin-bottom: 20px; }
+                .header p { margin: 3px 0; }
+                .company-name-container {
+                    margin-top: 30px;
+                }
+                .company-name { 
+                    font-weight: bold; 
+                    text-decoration: underline; 
+                    font-size: 16pt; 
+                    margin-bottom: 5px;
+                }
+                .date-container {
+                    margin: 40px 0;
+                }
+                .date { 
+                    font-weight: bold; 
+                    font-size: 14pt; 
+                }
+                .bold { font-weight: bold; }
+                .right-align { 
+                    text-align: right; 
+                    margin-top: 10px;
+                }
+                .header-row { 
+                    display: flex; 
+                    justify-content: space-between; 
+                    align-items: flex-start;
+                }
+                .header-left { flex: 1; }
+                .header-right { text-align: right; }
+                h2 { 
+                    font-size: 14pt; 
+                    margin-top: 20px;
+                    margin-bottom: 10px;
+                    text-align: center;
+                }
+                .footer { margin-top: 20px; }
+                .footer-row { 
+                    display: flex; 
+                    justify-content: space-between; 
+                    margin-top: 40px;
+                }
+                .footer-item { 
+                    flex: 1; 
+                    text-align: left; 
+                    margin-right: 30px;
+                }
+                .footer-line { 
+                    border-top: 1px solid black; 
+                    margin-top: 60px;
+                    width: 100%;
+                }
+                .withdraw-date-styled { 
+                    font-weight: bold; 
+                    font-size: 14pt; 
                 }
             </style>
         </head>
         <body>
-            <div style="text-align: left; font-size: 10pt;">
-              <strong>利泉食品私人有限公司</strong><br>
-              <strong>LI CHUAN FOOD PRODUCTS PTE LTD</strong><br>
-              <hr> 
-              40 Woodlands Terrace Singapore 738456<br>
-              Tel: 65 6755 7688 &nbsp;&nbsp;&nbsp;&nbsp; Fax: 65 6755 6698
-            </div>
-            <br>
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; font-size: 10pt;">
-              <div style="text-align: left;">
-                <strong>Jordon Food Industries Pte Ltd</strong><br>
-                13 Woodlands Loop, Singapore 738284<br>
-                Tel : +65 6551 5083 &nbsp;&nbsp;&nbsp;&nbsp; Fax: +65 6257 8660
-              </div>
-              <!-- S/N, Date, Time block will be inserted by new logic below -->
-            </div>
-            
-            <div style="font-size: 10pt; padding-top: 10px; padding-bottom: 10px;">
-              <div style="text-align: right; margin-bottom: 3px;">
-                <strong>S/N:</strong> ${escapeHtml(serialNumber)}
-              </div>
-              <div style="text-align: right; margin-bottom: 3px;">
-                <span class="withdraw-date-styled">Withdraw Date : ${formattedWithdrawDate}</span>
-              </div>
-              <div style="text-align: right;">
-                Collection Time : ${escapeHtml(collectionTime)}
-              </div>
-            </div>
-
-            <h1 style="text-align: center; font-size: 14pt; margin-top: 20px; margin-bottom:20px;">Jordon Withdraw Form</h1>
-            
-            <table>
-                <thead>
-                    <tr>
-                        <th>S/N</th>
-                        <th>Product Name</th>
-                        <th>Packing Size</th>
-                        <th>Location</th>
-                        <th>Lot No</th>
-                        <th>Plts</th>
-                        <th>Quantity</th>
-                        <th>Batch No</th>
-                        <th>WH</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${tableRowsHtml}
-                </tbody>
-            </table>
-            <div style="margin-top: 50px; font-size: 10pt; display: flex; justify-content: space-around; padding-top: 30px; border-top: 1px solid #000;">
-              <div>
-                <p>Regards Issued By :</p>
-                <p style="margin-top: 40px;">_________________________</p>
-              </div>
-              <div>
-                <p>Collected By :</p>
-                <p style="margin-top: 40px;">_________________________</p>
-              </div>
-              <div>
-                <p>Verified By :</p>
-                <p style="margin-top: 40px;">_________________________</p>
-              </div>
+            <div class="content">
+                <div class="header">
+                    <div class="header-row">
+                        <div class="header-left">
+                            <div class="company-name-container">
+                                <p class="company-name">Li Chuan Food Product Pte Ltd</p>
+                                <p>40 Woodlands Terrace 738456</p>
+                                <p>Tel 65 6755 7688 Fax 65 6755 6698</p>
+                            </div>
+                        </div>
+                        <div class="header-right">
+                            <p class="bold">S/N: ${escapeHtml(serialNumber)}</p>
+                        </div>
+                    </div>
+                    <div class="date-container">
+                        <p class="date">Withdraw Date: ${formattedWithdrawDate}</p>
+                    </div>
+                    <p class="attn">Attn: Jordon Food Industries Pte Ltd</p>
+                    <p>13 Woodlands Loop, Singapore 738284</p>
+                    <p>Tel: +65 6551 5083 Fax: +65 6257 8660</p>
+                    <p class="right-align"><span class="bold">Collection Time: ${escapeHtml(collectionTime)}</span></p>
+                </div>
+                <h2>Jordon Withdraw Form</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>No.</th>
+                            <th>Product Name</th>
+                            <th>Packing Size</th>
+                            <th>Loc</th> <!-- Changed from "Location" to "Loc" -->
+                            <th>Lot No</th>
+                            <th>Plts</th>
+                            <th>Qty</th> <!-- Changed from "Quantity" to "Qty" -->
+                            <th>Batch No</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tableRowsHtml}
+                    </tbody>
+                </table>
+                <div class="footer">
+                    <p>Regards,</p>
+                    <div class="footer-row">
+                        <div class="footer-item">
+                            <p>Issue By:</p>
+                            <div class="footer-line"></div>
+                        </div>
+                        <div class="footer-item">
+                            <p>Collected By:</p>
+                            <div class="footer-line"></div>
+                        </div>
+                        <div class="footer-item">
+                            <p>Verified By:</p>
+                            <div class="footer-line"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </body>
         </html>
