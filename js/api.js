@@ -145,7 +145,11 @@ window.inventoryAPI = {
             productsSnapshot.docs.forEach(doc => {
                 const product = doc.data();
                 if (product.productCode) {
-                    productMap.set(product.productCode, product.name || 'Unknown Product');
+                    // Storing more product info for later use in inventory rendering
+                    productMap.set(product.productCode, { 
+                        name: product.name || 'Unknown Product',
+                        packaging: product.packaging || '' 
+                    });
                 }
             });
 
@@ -160,10 +164,13 @@ window.inventoryAPI = {
                 const productCode = item.productCode;
                 if (!productCode) return; // Skip items without productCode
 
+                const productDetails = productMap.get(productCode) || { name: 'Unknown Product (Code not in products collection)', packaging: '' };
+
                 if (!aggregatedData.has(productCode)) {
                     aggregatedData.set(productCode, {
                         productCode: productCode,
-                        productName: productMap.get(productCode) || 'Unknown Product (Code not in products collection)',
+                        productName: productDetails.name,
+                        packaging: productDetails.packaging, // Add packaging here
                         totalQuantity: 0,
                         quantitiesByWarehouseId: {}
                     });
@@ -193,40 +200,59 @@ window.inventoryAPI = {
 window.transactionAPI = {
     async getTransactions(params = {}) {
         try {
-            const defaultLimit = 10; 
+            // If fetching for a specific product, we might want all its transactions to calculate balance.
+            // So, use a larger limit. For general view, use a smaller default.
+            const defaultLimit = params.productCode ? 1000 : 10; 
             const limit = params.limit || defaultLimit;
-            let query = window.db.collection('transactions').orderBy('transactionDate', 'desc');
+            let query = window.db.collection('transactions');
 
+            // If a productCode is specified, filter by it and sort by date ascending for balance calculation.
+            if (params.productCode) {
+                query = query.where('productCode', '==', params.productCode).orderBy('transactionDate', 'asc');
+            } else {
+                // Default sort for the general transactions page (usually most recent first)
+                query = query.orderBy('transactionDate', 'desc');
+            }
+
+            // Apply other filters
             if (params.type) {
                 query = query.where('type', '==', params.type);
             }
             if (params.startDate) { 
+                // Ensure startDate is a Firestore Timestamp or Date object if comparing with 'transactionDate'
                 query = query.where('transactionDate', '>=', params.startDate);
             }
             if (params.endDate) { 
+                // Ensure endDate is a Firestore Timestamp or Date object
                 query = query.where('transactionDate', '<=', params.endDate);
             }
-            if (params.lastVisibleDocId) {
+            
+            // Pagination: Only apply if not fetching for a specific productCode (where we typically want all)
+            // and if lastVisibleDocId is provided.
+            if (params.lastVisibleDocId && !params.productCode) {
                 const lastDocSnapshot = await window.db.collection('transactions').doc(params.lastVisibleDocId).get();
                 if (lastDocSnapshot.exists) {
                     query = query.startAfter(lastDocSnapshot);
                 }
             }
+            
             query = query.limit(limit);
             const querySnapshot = await query.get();
             const transactions = querySnapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
             }));
+
             let lastVisibleDocId = null;
             if (querySnapshot.docs.length > 0) {
                 lastVisibleDocId = querySnapshot.docs[querySnapshot.docs.length - 1].id;
             }
+
             return {
                 data: transactions,
                 pagination: {
                     lastVisibleDocId: lastVisibleDocId,
-                    hasNextPage: transactions.length === limit, 
+                    hasNextPage: transactions.length === limit && !params.productCode, // hasNextPage might not be relevant if we fetch all for a product
                     currentPage: params.currentPage || 1, 
                     itemsPerPage: limit
                 }
