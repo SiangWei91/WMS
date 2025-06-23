@@ -120,10 +120,10 @@ function createNavItem(htmlString) {
 function initNavigation() {
   const mainNavList = document.querySelector('.sidebar nav ul');
   const publicWarehouseMenuItem = document.getElementById('public-warehouse-menu');
-  const publicWarehouseToggle = publicWarehouseMenuItem ? publicWarehouseMenuItem.querySelector('.public-warehouse-toggle') : null;
+  // const publicWarehouseToggle = publicWarehouseMenuItem ? publicWarehouseMenuItem.querySelector('.public-warehouse-toggle') : null; // No longer primary trigger
 
-  if (!mainNavList || !publicWarehouseMenuItem || !publicWarehouseToggle) {
-    console.error('Essential navigation elements not found.');
+  if (!mainNavList || !publicWarehouseMenuItem) { // publicWarehouseToggle is not essential for the new logic
+    console.error('Essential navigation elements (mainNavList or publicWarehouseMenuItem) not found.');
     return;
   }
 
@@ -137,80 +137,64 @@ function initNavigation() {
       }
     });
     publicWarehouseMenuItem.classList.remove('expanded');
+    // publicWarehouseMenuItem.classList.remove('active'); // Ensure parent is not active when items are removed
   }
 
-  // Click listener for Public Warehouse Toggle
-  publicWarehouseToggle.addEventListener('click', function(event) {
-    event.stopPropagation();
-    const isCurrentlyExpanded = publicWarehouseMenuItem.classList.contains('expanded');
-
-    if (isCurrentlyExpanded) {
-      removeDynamicNavItems();
-    } else {
-      // Not expanded, so add items
-      publicWarehouseMenuItem.classList.add('expanded');
-      
-      // Create and insert items in reverse order of appearance for insertAdjacentElement('afterend')
-      // or use .after() with multiple elements if fully supported.
-      // Using insertAdjacentElement for broader compatibility and clarity.
-      const singlongItem = createNavItem(NAV_ITEM_SINGLONG_HTML);
-      const lineageItem = createNavItem(NAV_ITEM_LINEAGE_HTML);
-      const jordonItem = createNavItem(NAV_ITEM_JORDON_HTML);
-
-      // Insert after publicWarehouseMenuItem. If inserting multiple, consider order.
-      // publicWarehouseMenuItem.after(jordonItem, lineageItem, singlongItem); // Modern way
-      // Fallback for potentially broader compatibility:
-      let currentLastItem = publicWarehouseMenuItem;
-      [jordonItem, lineageItem, singlongItem].forEach(item => {
-          currentLastItem.insertAdjacentElement('afterend', item);
-          currentLastItem = item; // Next item will be inserted after this one
-      });
-    }
-  });
-
-  // Event Delegation for Page Loading on mainNavList
+  // Unified click listener for the main navigation list
   mainNavList.addEventListener('click', function(event) {
-    const targetLi = event.target.closest('li[data-page]');
-
-    // Ignore clicks not on a data-page LI, or clicks on the toggle div itself
-    if (!targetLi || (publicWarehouseToggle && publicWarehouseToggle.contains(event.target))) {
-      // If the click was on the toggle, it's handled by its own listener.
-      // If it was on publicWarehouseMenuItem but not the toggle, and PWMenuItem has no data-page, ignore.
-      if (targetLi === publicWarehouseMenuItem && !publicWarehouseMenuItem.hasAttribute('data-page')) {
-          return;
-      }
-      if(!targetLi) return; // truly not a data-page item
+    const clickedLi = event.target.closest('li');
+    if (!clickedLi) {
+      return; // Click was not inside an <li>
     }
-    
-    const page = targetLi.getAttribute('data-page');
-    if (!page) return; // Should be redundant due to selector, but good practice
 
-    // Deactivate all LIs and remove 'expanded' from PW parent
+    const isPublicWarehouseParentClicked = clickedLi.id === 'public-warehouse-menu';
+    const isDynamicSubItemClicked = clickedLi.classList.contains('dynamic-nav-item');
+    const pageToLoad = clickedLi.getAttribute('data-page');
+
+    // First, handle activation/deactivation for all items
     mainNavList.querySelectorAll('li').forEach(li => {
-        li.classList.remove('active');
-        if (li.id === 'public-warehouse-menu') {
-            li.classList.remove('expanded'); // 'expanded' is the new 'active-parent'
-        }
+      li.classList.remove('active');
     });
 
-    // Activate the clicked LI
-    targetLi.classList.add('active');
+    if (isPublicWarehouseParentClicked && !pageToLoad) { // Click on the main "Public Warehouse" <li> itself, and it's not a page link
+      event.stopPropagation(); 
+      const isCurrentlyExpanded = publicWarehouseMenuItem.classList.contains('expanded');
+      if (isCurrentlyExpanded) {
+        removeDynamicNavItems(); // This removes 'expanded'
+        // publicWarehouseMenuItem.classList.remove('active'); // Kept inactive if collapsed
+      } else {
+        publicWarehouseMenuItem.classList.add('expanded');
+        publicWarehouseMenuItem.classList.add('active'); // PW parent is active when expanded
 
-    if (targetLi.classList.contains('dynamic-nav-item')) {
-      // If a dynamic item is clicked, ensure its parent (PW) is marked as expanded
-      publicWarehouseMenuItem.classList.add('expanded');
-    } else {
-      // If a static top-level item (not PW itself, unless PW becomes clickable for a page) is clicked,
-      // remove dynamic items.
-      if (targetLi !== publicWarehouseMenuItem) { // Check it's not PW itself
-          removeDynamicNavItems();
+        const singlongItem = createNavItem(NAV_ITEM_SINGLONG_HTML);
+        const lineageItem = createNavItem(NAV_ITEM_LINEAGE_HTML);
+        const jordonItem = createNavItem(NAV_ITEM_JORDON_HTML);
+        let currentLastItem = publicWarehouseMenuItem;
+        [jordonItem, lineageItem, singlongItem].forEach(item => {
+          currentLastItem.insertAdjacentElement('afterend', item);
+          currentLastItem = item;
+        });
       }
+    } else if (pageToLoad) { // Click on an item that loads a page
+      clickedLi.classList.add('active'); // Activate the clicked item
+
+      if (isDynamicSubItemClicked) {
+        // If a sub-item is clicked, ensure the "Public Warehouse" parent is also expanded and active
+        publicWarehouseMenuItem.classList.add('expanded');
+        publicWarehouseMenuItem.classList.add('active');
+      } else {
+        // If a regular top-level item (not a sub-item of PW) is clicked, collapse PW
+        removeDynamicNavItems(); // This removes 'expanded' from PW
+        // publicWarehouseMenuItem.classList.remove('active'); // Ensure PW is not active (handled by general deactivation above)
+      }
+      loadPage(pageToLoad);
     }
-    loadPage(page);
+    // If the click was on an LI that doesn't have 'data-page' and isn't the PW parent for toggling, it's handled by general deactivation.
   });
 
-  // Initial state: Ensure no dynamic items are present, PW is not expanded.
+  // Initial state: Ensure no dynamic items are present, PW is not expanded or active.
   removeDynamicNavItems(); 
+  publicWarehouseMenuItem.classList.remove('active');
 }
 
 // 加载页面内容
