@@ -7,39 +7,39 @@ async function loadTransactions() {
     content.innerHTML = `
         <div class="transactions">
             <div class="page-header">
-                <h1>交易记录</h1>
+                <h1>Transaction Record</h1>
                 <div class="filters">
                     <div class="filter-group">
-                        <label for="transaction-type">类型:</label>
+                        <label for="transaction-type">Type:</label>
                         <select id="transaction-type">
-                            <option value="">全部</option>
-                            <option value="inbound">入库</option>
-                            <option value="outbound">出库</option>
-                            <option value="initial">初始</option>
+                            <option value="">All</option>
+                            <option value="inbound">Inbound</option>
+                            <option value="outbound">Outbound</option>
+                            <option value="initial">Initial</option>
                         </select>
                     </div>
                     <div class="filter-group">
-                        <label for="start-date">开始日期:</label>
+                        <label for="start-date">Start Date:</label>
                         <input type="date" id="start-date">
                     </div>
                     <div class="filter-group">
-                        <label for="end-date">结束日期:</label>
+                        <label for="end-date">End Date:</label>
                         <input type="date" id="end-date">
                     </div>
-                    <button id="apply-filters" class="btn btn-primary">应用筛选</button>
+                    <button id="apply-filters" class="btn btn-primary">Apply Filters</button>
                 </div>
             </div>
             <div class="table-container">
                 <table>
                     <thead>
                         <tr>
-                            <th>日期</th>
-                            <th>类型</th>
-                            <th>产品代码</th>
-                            <th>产品名称</th>
-                            <th>仓库</th>
-                            <th>数量</th>
-                            <th>操作员</th>
+                            <th>Date</th>
+                            <th>Type</th>
+                            <th>Product Code</th>
+                            <th>Product Description</th>
+                            <th>Warehouse</th>
+                            <th>Quantity</th>
+                            <th>Operator</th>
                         </tr>
                     </thead>
                     <tbody id="transactions-table-body">
@@ -93,7 +93,7 @@ function renderTransactionsTable(transactions) {
     transactions.forEach(tx => {
         const row = document.createElement('tr');
         row.innerHTML = `
-            <td>${formatDate(tx.date)}</td>
+            <td>${formatDate(tx.transactionDate)}</td>
             <td>
                 <span class="badge ${getTransactionBadgeClass(tx.type)}">
                     ${getTransactionTypeText(tx.type)}
@@ -172,9 +172,9 @@ function applyTransactionFilters() {
 
 function getTransactionTypeText(type) {
     const types = {
-        inbound: '入库',
-        outbound: '出库',
-        initial: '初始'
+        inbound: 'Inbound',
+        outbound: 'Outbound',
+        initial: 'Initial'
     };
     return types[type] || type;
 }
@@ -191,5 +191,12 @@ function getTransactionBadgeClass(type) {
 function formatDate(timestamp) {
     if (!timestamp) return '-';
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleString();
+
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
