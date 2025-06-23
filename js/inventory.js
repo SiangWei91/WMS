@@ -6,7 +6,7 @@ const ALLOWED_WAREHOUSE_NAMES_FOR_EXPANDED_VIEW = [
 ];
 
 let currentAggregatedInventory = [];
-let currentWarehouses = [];
+let currentWarehouses = []; // This global variable will store warehouse data {id, name}
 let isInventoryExpanded = false;
 let currentSearchTerm = '';
 
@@ -20,8 +20,33 @@ const WAREHOUSE_ABBREVIATIONS = {
     "Blk 15": "B15",
     "Coldroom 5": "CR5",
     "Coldroom 6": "CR6"
-    // Add more mappings if warehouse names from Firestore need specific abbreviations
 };
+
+// Helper functions for transaction display (adapted from js/transactions.js)
+function formatTransactionDate(timestamp) {
+    if (!timestamp) return '-';
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleString();
+}
+
+function getTransactionTypeText(type) {
+    const types = {
+        inbound: 'Stock In',
+        outbound: 'Stock Out',
+        initial: 'Initial Stock'
+    };
+    return types[type] || type;
+}
+
+function getTransactionBadgeClass(type) {
+    const classes = {
+        inbound: 'badge-success',
+        outbound: 'badge-danger',
+        initial: 'badge-info'
+    };
+    return classes[type] || 'badge-secondary';
+}
+
 
 async function loadInventory() {
     const content = document.getElementById('content');
@@ -51,29 +76,56 @@ async function loadInventory() {
                 <!-- Pagination controls are removed for now as we load all data for client-side aggregation -->
             </div>
         </div>
+
+        <!-- Modal for Product Transactions -->
+        <div id="product-transactions-modal" class="modal">
+            <div class="modal-content">
+                <span class="close-button">&times;</span>
+                <h2 id="modal-title" style="margin-top:0;">Product Transactions</h2>
+                <p><strong>Product:</strong> <span id="modal-product-name"></span></p>
+                <p><strong>Packing Size:</strong> <span id="modal-packaging-size"></span></p>
+                <div id="modal-transactions-content" class="table-container" style="max-height: 450px; overflow-y: auto;">
+                    <!-- Transactions grouped by warehouse will be inserted here -->
+                </div>
+                <button onclick="closeProductTransactionsModal()" style="margin-top: 15px;" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
     `;
 
     document.getElementById('inventory-search').addEventListener('input', handleInventorySearch);
     document.getElementById('expand-collapse-btn').addEventListener('click', toggleExpandView);
     
-    // Set initial button text before fetching data
+    const closeButton = document.querySelector('#product-transactions-modal .close-button');
+    if (closeButton) {
+        closeButton.addEventListener('click', closeProductTransactionsModal);
+    }
+    window.addEventListener('click', function(event) {
+        const modal = document.getElementById('product-transactions-modal');
+        if (event.target == modal) {
+            closeProductTransactionsModal();
+        }
+    });
+    
     updateExpandCollapseButtonText(); 
     await fetchDataAndDisplayInventory();
 }
 
 async function fetchDataAndDisplayInventory() {
     const tableBody = document.getElementById('inventory-table-body');
-    if (tableBody) { // Show loading message in table body
+    if (tableBody) { 
         const currentCols = isInventoryExpanded ? 3 + currentWarehouses.length : 3;
         tableBody.innerHTML = `<tr><td colspan="${currentCols || 3}" class="text-center">Fetching and processing data...</td></tr>`;
     }
 
     try {
-        // window.inventoryAPI.getInventory now returns { aggregatedInventory, warehouses }
         const response = await window.inventoryAPI.getInventory();
         currentAggregatedInventory = response.aggregatedInventory || [];
-        currentWarehouses = response.warehouses || [];
-        currentWarehouses.sort((a, b) => (WAREHOUSE_ABBREVIATIONS[a.name] || a.name).localeCompare(WAREHOUSE_ABBREVIATIONS[b.name] || b.name)); // Sort warehouses for consistent column order
+        currentAggregatedInventory.forEach(item => {
+            if (item.packaging === undefined) item.packaging = '-';
+        });
+        // Store warehouses globally for use in displayProductTransactions
+        currentWarehouses = response.warehouses || []; 
+        currentWarehouses.sort((a, b) => (WAREHOUSE_ABBREVIATIONS[a.name] || a.name).localeCompare(WAREHOUSE_ABBREVIATIONS[b.name] || b.name));
         
         displayInventory(); 
     } catch (error) {
@@ -94,14 +146,11 @@ function displayInventory() {
         );
     }
 
-    // Filter warehouses to only include allowed ones for display
     const warehousesForDisplay = currentWarehouses.filter(wh => 
         ALLOWED_WAREHOUSE_NAMES_FOR_EXPANDED_VIEW.includes(wh.name)
     );
-    // Sort the filtered warehouses for consistent column order in the expanded view
-    // This sorting was previously in fetchDataAndDisplayInventory, moving it here to act on the filtered list.
     warehousesForDisplay.sort((a, b) => {
-        const nameA = WAREHOUSE_ABBREVIATIONS[a.name] || a.name; // Use abbreviation for sorting if available
+        const nameA = WAREHOUSE_ABBREVIATIONS[a.name] || a.name;
         const nameB = WAREHOUSE_ABBREVIATIONS[b.name] || b.name;
         return nameA.localeCompare(nameB);
     });
@@ -119,29 +168,21 @@ function updateExpandCollapseButtonText() {
 
 function toggleExpandView() {
     isInventoryExpanded = !isInventoryExpanded;
-    // When toggling, we re-render with the full (unfiltered) data or current filtered data.
-    // If a search term exists, displayInventory will apply it.
     displayInventory();
 }
 
 function handleInventorySearch(e) {
     currentSearchTerm = e.target.value.trim();
-    displayInventory(); // Re-filter and re-render the current data
+    displayInventory();
 }
 
-// The renderInventoryTable function will be implemented in the next step (Step 3).
-// For now, to avoid errors, we can add a placeholder if this file were to be run independently.
-// However, since this is part of a sequence, we'll implement it fully in the next step.
 function renderInventoryTable(aggregatedItems, warehouses, isExpanded) {
     const table = document.querySelector('.inventory table');
-    if (!table) {
-        console.error("Inventory table element not found for rendering.");
-        return;
-    }
+    if (!table) return;
     let thead = table.querySelector('thead');
     if (!thead) {
         thead = document.createElement('thead');
-        table.insertBefore(thead, table.querySelector('tbody') || null); // ensure tbody exists or append thead
+        table.insertBefore(thead, table.querySelector('tbody') || null);
     }
     let tbody = table.querySelector('tbody#inventory-table-body');
     if (!tbody) {
@@ -153,18 +194,12 @@ function renderInventoryTable(aggregatedItems, warehouses, isExpanded) {
     thead.innerHTML = ''; 
     tbody.innerHTML = ''; 
 
-    // Dynamically create warehouse ID to abbreviation map for efficient lookup
-    // This uses the actual names from the fetched `warehouses` data.
     const warehouseIdToAbbreviation = {};
-    const sortedWarehousesForDisplay = [...warehouses].sort((a, b) => {
-        const nameA = WAREHOUSE_ABBREVIATIONS[a.name] || a.name;
-        const nameB = WAREHOUSE_ABBREVIATIONS[b.name] || b.name;
-        return nameA.localeCompare(nameB);
-    });
-
-
+    const sortedWarehousesForDisplay = [...warehouses].sort((a, b) => 
+        (WAREHOUSE_ABBREVIATIONS[a.name] || a.name).localeCompare(WAREHOUSE_ABBREVIATIONS[b.name] || b.name)
+    );
     sortedWarehousesForDisplay.forEach(wh => {
-        warehouseIdToAbbreviation[wh.id] = WAREHOUSE_ABBREVIATIONS[wh.name] || wh.name; // Fallback to full name if no abbreviation
+        warehouseIdToAbbreviation[wh.id] = WAREHOUSE_ABBREVIATIONS[wh.name] || wh.name;
     });
 
     const headerRow = thead.insertRow();
@@ -174,17 +209,15 @@ function renderInventoryTable(aggregatedItems, warehouses, isExpanded) {
     totalQtyHeaderCell.textContent = 'Total Qty';
     totalQtyHeaderCell.style.textAlign = 'center';
 
-
     if (isExpanded) {
         sortedWarehousesForDisplay.forEach(wh => {
             const th = headerRow.insertCell();
             th.textContent = warehouseIdToAbbreviation[wh.id];
-            th.style.textAlign = 'center'; // Center align header for warehouse columns
+            th.style.textAlign = 'center';
         });
     }
     
     const colCount = headerRow.cells.length;
-
     if (!aggregatedItems || aggregatedItems.length === 0) {
         tbody.innerHTML = `<tr><td colspan="${colCount}" class="text-center">No inventory records found${currentSearchTerm ? ' for "' + currentSearchTerm + '"' : ''}.</td></tr>`;
         return;
@@ -192,39 +225,144 @@ function renderInventoryTable(aggregatedItems, warehouses, isExpanded) {
 
     aggregatedItems.forEach(item => {
         const row = tbody.insertRow();
+        row.style.cursor = 'pointer';
+        row.setAttribute('data-product-code', item.productCode);
+        row.setAttribute('data-product-name', item.productName);
+        row.setAttribute('data-packaging', item.packaging || '-');
+        row.onclick = function() {
+            displayProductTransactions(
+                this.getAttribute('data-product-code'),
+                this.getAttribute('data-product-name'),
+                this.getAttribute('data-packaging')
+            );
+        };
+        
         row.insertCell().textContent = item.productCode || '-';
         row.insertCell().textContent = item.productName || '-';
         const totalQtyCell = row.insertCell();
         totalQtyCell.textContent = item.totalQuantity !== undefined ? item.totalQuantity : '-';
         totalQtyCell.style.textAlign = 'center';
 
-
         if (isExpanded) {
             sortedWarehousesForDisplay.forEach(wh => {
                 const qty = item.quantitiesByWarehouseId[wh.id] || 0;
                 const cell = row.insertCell();
-                cell.textContent = qty === 0 ? '' : qty; // Display empty string if qty is 0
-                cell.style.textAlign = 'center'; // Center align quantity
+                cell.textContent = qty === 0 ? '' : qty;
+                cell.style.textAlign = 'center';
             });
         }
     });
 }
-// formatDate function is no longer used by renderInventoryTable in this new structure.
-// If other parts of the application might need it, it can be kept or moved to a utility file.
-// For now, it's removed to keep js/inventory.js focused on the current task.
-/*
-function formatDate(timestamp) {
-    if (!timestamp) return '-';
-    if (timestamp.toDate) { // Check if it's a Firestore Timestamp
-        return timestamp.toDate().toLocaleString();
-    } else if (timestamp.seconds) { // Fallback for old structure if any
-         const date = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
-         return date.toLocaleString();
-    }
-    // If it's already a string or number, try to parse it
-    const d = new Date(timestamp);
-    if (isNaN(d.getTime())) return '-'; // Check if parsing resulted in a valid date
-    return d.toLocaleString();
+
+function openProductTransactionsModal() {
+    const modal = document.getElementById('product-transactions-modal');
+    if (modal) modal.style.display = 'block';
 }
-*/
-console.log("Inventory JS loaded for aggregated view.");
+
+function closeProductTransactionsModal() {
+    const modal = document.getElementById('product-transactions-modal');
+    if (modal) modal.style.display = 'none';
+    const transactionsContentDiv = document.getElementById('modal-transactions-content');
+    if (transactionsContentDiv) transactionsContentDiv.innerHTML = ''; // Clear previous content
+}
+
+async function displayProductTransactions(productCode, productName, packaging) {
+    if (!productCode) {
+        alert("Product code is missing. Cannot display transactions.");
+        return;
+    }
+
+    document.getElementById('modal-product-name').textContent = productName || 'N/A';
+    document.getElementById('modal-packaging-size').textContent = packaging || 'N/A';
+    const transactionsContentDiv = document.getElementById('modal-transactions-content');
+    transactionsContentDiv.innerHTML = '<p class="text-center">Loading transactions...</p>';
+    
+    openProductTransactionsModal();
+
+    try {
+        const response = await window.transactionAPI.getTransactions({ productCode: productCode, limit: 1000 }); 
+        const allTransactions = response.data || [];
+
+        if (allTransactions.length === 0) {
+            transactionsContentDiv.innerHTML = `<p class="text-center">No transactions found for ${productName}.</p>`;
+            return;
+        }
+
+        transactionsContentDiv.innerHTML = ''; // Clear loading message
+
+        // Group transactions by warehouseId
+        const transactionsByWarehouse = allTransactions.reduce((acc, tx) => {
+            const whId = tx.warehouseId || 'unknown_warehouse';
+            if (!acc[whId]) {
+                acc[whId] = [];
+            }
+            acc[whId].push(tx);
+            return acc;
+        }, {});
+
+        // Create a map for quick lookup of warehouse names
+        const warehouseNameMap = currentWarehouses.reduce((map, wh) => {
+            map[wh.id] = wh.name;
+            return map;
+        }, {});
+
+        for (const warehouseId in transactionsByWarehouse) {
+            const warehouseTransactions = transactionsByWarehouse[warehouseId];
+            const warehouseName = warehouseNameMap[warehouseId] || `Unknown Warehouse (ID: ${warehouseId})`;
+
+            // Add Warehouse Sub-heading
+            const heading = document.createElement('h4');
+            heading.className = 'warehouse-transaction-heading'; // For styling
+            heading.textContent = `Warehouse: ${warehouseName}`;
+            transactionsContentDiv.appendChild(heading);
+
+            // Create table for this warehouse
+            const table = document.createElement('table');
+            table.className = 'table table-striped table-hover table-sm'; // Added table-sm for denser packing
+            const thead = table.createTHead();
+            const tbody = table.createTBody();
+            
+            const headerRow = thead.insertRow();
+            ['Date', 'Type', 'Quantity', 'Batch No', 'Balance'].forEach(text => {
+                const th = document.createElement('th');
+                th.textContent = text;
+                headerRow.appendChild(th);
+            });
+            transactionsContentDiv.appendChild(table);
+
+            let currentBalance = 0;
+            // Transactions are already sorted by date from API
+            warehouseTransactions.forEach(tx => {
+                const row = tbody.insertRow();
+                const quantity = Number(tx.quantity) || 0;
+
+                if (tx.type === 'inbound' || tx.type === 'initial') {
+                    currentBalance += quantity;
+                } else if (tx.type === 'outbound') {
+                    currentBalance -= quantity;
+                }
+
+                row.insertCell().textContent = formatTransactionDate(tx.transactionDate);
+                
+                const typeCell = row.insertCell();
+                const typeSpan = document.createElement('span');
+                typeSpan.className = `badge ${getTransactionBadgeClass(tx.type)}`;
+                typeSpan.textContent = getTransactionTypeText(tx.type);
+                typeCell.appendChild(typeSpan);
+
+                const quantityCell = row.insertCell();
+                quantityCell.textContent = (tx.type === 'inbound' || tx.type === 'initial' ? '+' : '-') + quantity;
+                quantityCell.className = (tx.type === 'inbound' || tx.type === 'initial') ? 'text-success' : 'text-danger';
+                
+                row.insertCell().textContent = tx.batchNo || '-';
+                row.insertCell().textContent = currentBalance;
+            });
+        }
+
+    } catch (error) {
+        console.error(`Error fetching transactions for product ${productCode}:`, error);
+        transactionsContentDiv.innerHTML = `<p class="text-center text-danger">Error loading transactions.</p>`;
+    }
+}
+
+console.log("Inventory JS loaded for aggregated view with product transaction modal (warehouse grouping).");
