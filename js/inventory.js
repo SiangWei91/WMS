@@ -1,6 +1,27 @@
-// 库存管理逻辑
-let inventoryCurrentPage = 1;
-const inventoryRowsPerPage = 10; // Used for future server-side pagination logic
+// Inventory Management Logic (Aggregated View)
+
+const ALLOWED_WAREHOUSE_NAMES_FOR_EXPANDED_VIEW = [
+    "Blk 15", "Coldroom 1", "Coldroom 2", "Coldroom 5", "Coldroom 6", 
+    "Jordon", "Lineage", "Sing Long"
+];
+
+let currentAggregatedInventory = [];
+let currentWarehouses = [];
+let isInventoryExpanded = false;
+let currentSearchTerm = '';
+
+// Warehouse name to abbreviation mapping
+const WAREHOUSE_ABBREVIATIONS = {
+    "Jordon": "JD",
+    "Lineage": "LG",
+    "Sing Long": "SL",
+    "Coldroom 1": "CR1",
+    "Coldroom 2": "CR2",
+    "Blk 15": "B15",
+    "Coldroom 5": "CR5",
+    "Coldroom 6": "CR6"
+    // Add more mappings if warehouse names from Firestore need specific abbreviations
+};
 
 async function loadInventory() {
     const content = document.getElementById('content');
@@ -8,134 +29,190 @@ async function loadInventory() {
         <div class="inventory">
             <div class="page-header">
                 <h1>Inventory Management</h1>
-                <div class="search-box">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="inventory-search" placeholder="Search...">
+            </div>
+            <div class="controls-container" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;">
+                <button id="expand-collapse-btn" class="btn btn-info">Expand Details</button>
+                <div class="search-box" style="margin-left: auto;">
+                    <i class="fas fa-search" style="position: absolute; margin-left: 10px; margin-top: 11px; color: #aaa;"></i>
+                    <input type="text" id="inventory-search" placeholder="Search by Item Code/Desc..." style="padding-left: 30px; height: 38px; border-radius: 0.25rem; border: 1px solid #ced4da;">
                 </div>
             </div>
             <div class="table-container">
-                <table>
+                <table class="table table-striped table-hover">
                     <thead>
-                        <tr>
-                            <th>Item Code</th>
-                            <th>Product Description</th>
-                            <th>Warehouse</th>
-                            <th>Batch No</th>
-                            <th>Quantity</th>
-                            <th>Last Update</th>
-                        </tr>
+                        <!-- Headers will be dynamically rendered by renderInventoryTable -->
                     </thead>
                     <tbody id="inventory-table-body">
-                        <!-- 库存数据将在这里动态加载 -->
+                        <tr><td colspan="3">Loading inventory data...</td></tr>
                     </tbody>
                 </table>
-                <div class="pagination" id="inventory-pagination">
-                    <!-- 分页控件将在这里动态加载 -->
-                </div>
+            </div>
+            <div class="pagination" id="inventory-pagination">
+                <!-- Pagination controls are removed for now as we load all data for client-side aggregation -->
             </div>
         </div>
     `;
 
-    // 添加事件监听器
     document.getElementById('inventory-search').addEventListener('input', handleInventorySearch);
-
-    // 加载库存数据
-    await fetchInventory();
+    document.getElementById('expand-collapse-btn').addEventListener('click', toggleExpandView);
+    
+    // Set initial button text before fetching data
+    updateExpandCollapseButtonText(); 
+    await fetchDataAndDisplayInventory();
 }
 
-async function fetchInventory(searchTerm = '') {
+async function fetchDataAndDisplayInventory() {
+    const tableBody = document.getElementById('inventory-table-body');
+    if (tableBody) { // Show loading message in table body
+        const currentCols = isInventoryExpanded ? 3 + currentWarehouses.length : 3;
+        tableBody.innerHTML = `<tr><td colspan="${currentCols || 3}" class="text-center">Fetching and processing data...</td></tr>`;
+    }
+
     try {
-        const params = {
-            page: inventoryCurrentPage, 
-            limit: inventoryRowsPerPage, 
-            productCode: searchTerm     
-        };
+        // window.inventoryAPI.getInventory now returns { aggregatedInventory, warehouses }
+        const response = await window.inventoryAPI.getInventory();
+        currentAggregatedInventory = response.aggregatedInventory || [];
+        currentWarehouses = response.warehouses || [];
+        currentWarehouses.sort((a, b) => (WAREHOUSE_ABBREVIATIONS[a.name] || a.name).localeCompare(WAREHOUSE_ABBREVIATIONS[b.name] || b.name)); // Sort warehouses for consistent column order
         
-        // Explicitly using window.inventoryAPI to ensure clarity
-        const response = await window.inventoryAPI.getInventory(params);
-        renderInventoryTable(response.data);
-        renderInventoryPagination(response.pagination); 
+        displayInventory(); 
     } catch (error) {
-        console.error('获取库存列表失败 (Firestore):', error); 
-        alert('获取库存列表失败: ' + error.message);
+        console.error('Error fetching and aggregating inventory data:', error);
+        if (tableBody) {
+            tableBody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">Error loading inventory: ${error.message}</td></tr>`;
+        }
     }
 }
 
-function renderInventoryTable(inventoryItems) {
-    const tbody = document.getElementById('inventory-table-body');
-    tbody.innerHTML = '';
-
-    if (!inventoryItems || inventoryItems.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="6" class="no-data">没有找到库存记录</td>
-            </tr>
-        `;
-        return;
+function displayInventory() {
+    let filteredInventory = currentAggregatedInventory;
+    if (currentSearchTerm) {
+        const lowerSearchTerm = currentSearchTerm.toLowerCase();
+        filteredInventory = currentAggregatedInventory.filter(item =>
+            (item.productCode && item.productCode.toLowerCase().includes(lowerSearchTerm)) ||
+            (item.productName && item.productName.toLowerCase().includes(lowerSearchTerm))
+        );
     }
 
-    inventoryItems.forEach(item => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${item.productCode || '-'}</td>
-            <td>${item.productName || '-'}</td>
-            <td>${item.warehouseId || '-'}</td>
-            <td>${item.batchNo || '-'}</td>
-            <td class="${(item.quantity !== undefined && item.quantity < 10) ? 'low-stock' : ''}">${item.quantity !== undefined ? item.quantity : '-'}</td>
-            <td>${formatDate(item.lastUpdated)}</td>
-        `;
-        tbody.appendChild(row);
+    // Filter warehouses to only include allowed ones for display
+    const warehousesForDisplay = currentWarehouses.filter(wh => 
+        ALLOWED_WAREHOUSE_NAMES_FOR_EXPANDED_VIEW.includes(wh.name)
+    );
+    // Sort the filtered warehouses for consistent column order in the expanded view
+    // This sorting was previously in fetchDataAndDisplayInventory, moving it here to act on the filtered list.
+    warehousesForDisplay.sort((a, b) => {
+        const nameA = WAREHOUSE_ABBREVIATIONS[a.name] || a.name; // Use abbreviation for sorting if available
+        const nameB = WAREHOUSE_ABBREVIATIONS[b.name] || b.name;
+        return nameA.localeCompare(nameB);
     });
+
+    renderInventoryTable(filteredInventory, warehousesForDisplay, isInventoryExpanded);
+    updateExpandCollapseButtonText();
 }
 
-function renderInventoryPagination(pagination) {
-    const paginationDiv = document.getElementById('inventory-pagination');
-    paginationDiv.innerHTML = '';
-
-    const { page = 1, totalPages = 1 } = pagination || {};
-
-    const prevBtn = document.createElement('button');
-    prevBtn.className = 'btn-pagination';
-    prevBtn.disabled = page === 1;
-    prevBtn.innerHTML = '<i class="fas fa-chevron-left"></i>';
-    prevBtn.addEventListener('click', () => {
-        if (page > 1) {
-            inventoryCurrentPage = page - 1;
-            fetchInventory(document.getElementById('inventory-search').value.trim());
-        }
-    });
-    paginationDiv.appendChild(prevBtn);
-
-    for (let i = 1; i <= totalPages; i++) {
-        const pageBtn = document.createElement('button');
-        pageBtn.className = `btn-pagination ${i === page ? 'active' : ''}`;
-        pageBtn.textContent = i;
-        pageBtn.addEventListener('click', () => {
-            inventoryCurrentPage = i;
-            fetchInventory(document.getElementById('inventory-search').value.trim());
-        });
-        paginationDiv.appendChild(pageBtn);
+function updateExpandCollapseButtonText() {
+    const btn = document.getElementById('expand-collapse-btn');
+    if (btn) {
+        btn.textContent = isInventoryExpanded ? 'Collapse Details' : 'Expand Details';
     }
+}
 
-    const nextBtn = document.createElement('button');
-    nextBtn.className = 'btn-pagination';
-    nextBtn.disabled = page === totalPages;
-    nextBtn.innerHTML = '<i class="fas fa-chevron-right"></i>';
-    nextBtn.addEventListener('click', () => {
-        if (page < totalPages) {
-            inventoryCurrentPage = page + 1;
-            fetchInventory(document.getElementById('inventory-search').value.trim());
-        }
-    });
-    paginationDiv.appendChild(nextBtn);
+function toggleExpandView() {
+    isInventoryExpanded = !isInventoryExpanded;
+    // When toggling, we re-render with the full (unfiltered) data or current filtered data.
+    // If a search term exists, displayInventory will apply it.
+    displayInventory();
 }
 
 function handleInventorySearch(e) {
-    const searchTerm = e.target.value.trim();
-    inventoryCurrentPage = 1; 
-    fetchInventory(searchTerm);
+    currentSearchTerm = e.target.value.trim();
+    displayInventory(); // Re-filter and re-render the current data
 }
 
+// The renderInventoryTable function will be implemented in the next step (Step 3).
+// For now, to avoid errors, we can add a placeholder if this file were to be run independently.
+// However, since this is part of a sequence, we'll implement it fully in the next step.
+function renderInventoryTable(aggregatedItems, warehouses, isExpanded) {
+    const table = document.querySelector('.inventory table');
+    if (!table) {
+        console.error("Inventory table element not found for rendering.");
+        return;
+    }
+    let thead = table.querySelector('thead');
+    if (!thead) {
+        thead = document.createElement('thead');
+        table.insertBefore(thead, table.querySelector('tbody') || null); // ensure tbody exists or append thead
+    }
+    let tbody = table.querySelector('tbody#inventory-table-body');
+    if (!tbody) {
+        tbody = document.createElement('tbody');
+        tbody.id = 'inventory-table-body';
+        table.appendChild(tbody);
+    }
+
+    thead.innerHTML = ''; 
+    tbody.innerHTML = ''; 
+
+    // Dynamically create warehouse ID to abbreviation map for efficient lookup
+    // This uses the actual names from the fetched `warehouses` data.
+    const warehouseIdToAbbreviation = {};
+    const sortedWarehousesForDisplay = [...warehouses].sort((a, b) => {
+        const nameA = WAREHOUSE_ABBREVIATIONS[a.name] || a.name;
+        const nameB = WAREHOUSE_ABBREVIATIONS[b.name] || b.name;
+        return nameA.localeCompare(nameB);
+    });
+
+
+    sortedWarehousesForDisplay.forEach(wh => {
+        warehouseIdToAbbreviation[wh.id] = WAREHOUSE_ABBREVIATIONS[wh.name] || wh.name; // Fallback to full name if no abbreviation
+    });
+
+    const headerRow = thead.insertRow();
+    headerRow.insertCell().textContent = 'Item Code';
+    headerRow.insertCell().textContent = 'Product Description';
+    const totalQtyHeaderCell = headerRow.insertCell();
+    totalQtyHeaderCell.textContent = 'Total Qty';
+    totalQtyHeaderCell.style.textAlign = 'center';
+
+
+    if (isExpanded) {
+        sortedWarehousesForDisplay.forEach(wh => {
+            const th = headerRow.insertCell();
+            th.textContent = warehouseIdToAbbreviation[wh.id];
+            th.style.textAlign = 'center'; // Center align header for warehouse columns
+        });
+    }
+    
+    const colCount = headerRow.cells.length;
+
+    if (!aggregatedItems || aggregatedItems.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${colCount}" class="text-center">No inventory records found${currentSearchTerm ? ' for "' + currentSearchTerm + '"' : ''}.</td></tr>`;
+        return;
+    }
+
+    aggregatedItems.forEach(item => {
+        const row = tbody.insertRow();
+        row.insertCell().textContent = item.productCode || '-';
+        row.insertCell().textContent = item.productName || '-';
+        const totalQtyCell = row.insertCell();
+        totalQtyCell.textContent = item.totalQuantity !== undefined ? item.totalQuantity : '-';
+        totalQtyCell.style.textAlign = 'center';
+
+
+        if (isExpanded) {
+            sortedWarehousesForDisplay.forEach(wh => {
+                const qty = item.quantitiesByWarehouseId[wh.id] || 0;
+                const cell = row.insertCell();
+                cell.textContent = qty === 0 ? '' : qty; // Display empty string if qty is 0
+                cell.style.textAlign = 'center'; // Center align quantity
+            });
+        }
+    });
+}
+// formatDate function is no longer used by renderInventoryTable in this new structure.
+// If other parts of the application might need it, it can be kept or moved to a utility file.
+// For now, it's removed to keep js/inventory.js focused on the current task.
+/*
 function formatDate(timestamp) {
     if (!timestamp) return '-';
     if (timestamp.toDate) { // Check if it's a Firestore Timestamp
@@ -149,3 +226,5 @@ function formatDate(timestamp) {
     if (isNaN(d.getTime())) return '-'; // Check if parsing resulted in a valid date
     return d.toLocaleString();
 }
+*/
+console.log("Inventory JS loaded for aggregated view.");
