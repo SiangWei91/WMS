@@ -240,6 +240,191 @@ async function saveRowChanges(row) {
     }
 }
 
+// --- Report Tab Functions ---
+
+/**
+ * Fetches stock out forms from the 'jordonWithdrawForms' collection in Firestore.
+ * Orders them by creation date in descending order.
+ * @returns {Promise<Array<Object>>} A promise that resolves to an array of form objects, each with an 'id' property.
+ */
+async function loadStockOutFormsReport() {
+    console.log("loadStockOutFormsReport() called");
+    const reportContentContainer = document.getElementById('report-content-container');
+    if (reportContentContainer) {
+        reportContentContainer.innerHTML = '<p>Loading reports...</p>';
+    }
+
+    const db = firebase.firestore();
+    const forms = [];
+    try {
+        const formsQuery = db.collection('jordonWithdrawForms')
+            .orderBy('createdAt', 'desc'); // Order by creation time, newest first
+        const snapshot = await formsQuery.get();
+
+        if (snapshot.empty) {
+            console.log("No Jordon stock out forms found.");
+            if (reportContentContainer) {
+                reportContentContainer.innerHTML = '<p>No stock out forms found.</p>';
+            }
+            return forms; // Return empty array
+        }
+
+        snapshot.forEach(doc => {
+            forms.push({ id: doc.id, ...doc.data() });
+        });
+
+        console.log('Loaded Jordon stock out forms:', forms);
+        return forms;
+
+    } catch (error) {
+        console.error("Error loading Jordon stock out forms:", error);
+        if (reportContentContainer) {
+            reportContentContainer.innerHTML = '<p style="color: red;">Error loading stock out forms. Please try again.</p>';
+        }
+        throw error; // Re-throw the error to be caught by the caller
+    }
+}
+
+/**
+ * Displays the fetched stock out forms in a table within the "Report" tab.
+ * @param {Array<Object>} forms - An array of form objects.
+ */
+function displayStockOutFormsReport(forms) {
+    const reportContentContainer = document.getElementById('report-content-container');
+    if (!reportContentContainer) {
+        console.error('Report content container (#report-content-container) not found.');
+        return;
+    }
+
+    if (!forms || forms.length === 0) {
+        reportContentContainer.innerHTML = '<p>No stock out forms available to display.</p>';
+        return;
+    }
+
+    let tableHtml = `
+        <h2>Jordon Stock Out Forms</h2>
+        <table class="table-styling-class"> <!-- Use a general styling class if available -->
+            <thead>
+                <tr>
+                    <th>Serial Number</th>
+                    <th>Withdraw Date</th>
+                    <th>Collection Time</th>
+                    <th>Status</th>
+                    <th>Created At</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    forms.forEach(form => {
+        const withdrawDateParts = form.withdrawDate ? form.withdrawDate.split('-') : [];
+        const formattedWithdrawDate = withdrawDateParts.length === 3 ? `${withdrawDateParts[2]}/${withdrawDateParts[1]}/${withdrawDateParts[0]}` : escapeHtml(form.withdrawDate || 'N/A');
+        
+        let createdAtStr = 'N/A';
+        if (form.createdAt && form.createdAt.toDate) {
+            try {
+                createdAtStr = form.createdAt.toDate().toLocaleString();
+            } catch (e) {
+                console.warn("Could not format createdAt timestamp for form:", form.id, form.createdAt);
+                // Keep 'N/A' or use a fallback string
+            }
+        } else if (form.createdAt) {
+            // If it's already a string or number, display as is, or attempt basic formatting if it's a recognizable timestamp
+            createdAtStr = String(form.createdAt); 
+        }
+
+        tableHtml += `
+            <tr>
+                <td>${escapeHtml(form.serialNumber || 'N/A')}</td>
+                <td>${formattedWithdrawDate}</td>
+                <td>${escapeHtml(form.collectionTime || 'N/A')}</td>
+                <td>${escapeHtml(form.status || 'N/A')}</td>
+                <td>${escapeHtml(createdAtStr)}</td>
+                <td>
+                    <button class="btn btn-info btn-sm view-stock-out-form-btn" data-form-id="${escapeHtml(form.id)}">View/Reprint</button>
+                </td>
+            </tr>
+        `;
+    });
+
+    tableHtml += `
+            </tbody>
+        </table>
+    `;
+
+    reportContentContainer.innerHTML = tableHtml;
+}
+
+/**
+ * Handles the click on a "View/Reprint" button for a stock out form.
+ * Fetches the specific form data from Firestore and then uses
+ * `generatePrintableStockOutHTML` to display it in a new window.
+ * @param {string} formId - The ID of the Jordon Withdraw Form document in Firestore.
+ */
+async function handleViewStockOutForm(formId) {
+    console.log("handleViewStockOutForm called for form ID:", formId);
+    if (!formId) {
+        alert("Error: Form ID is missing. Cannot display form.");
+        return;
+    }
+
+    try {
+        const db = firebase.firestore();
+        const formRef = db.collection('jordonWithdrawForms').doc(formId);
+        const doc = await formRef.get();
+
+        if (!doc.exists) {
+            console.error("No such document with ID:", formId);
+            alert("Error: Could not find the specified stock out form. It may have been deleted.");
+            return;
+        }
+
+        const formData = { id: doc.id, ...doc.data() };
+
+        // The formData should now have the same structure as expected by generatePrintableStockOutHTML
+        // (serialNumber, withdrawDate, collectionTime, items array)
+        // If items within formData are structured differently than what generatePrintableStockOutHTML expects,
+        // you might need to transform them here. Assuming the structure is compatible.
+
+        if (!formData.items || !Array.isArray(formData.items)) {
+            console.error("Form data is missing 'items' array or it's not an array:", formData);
+            alert("Error: The form data is incomplete or corrupted. Cannot display items.");
+            return;
+        }
+        
+        // Ensure withdrawDate is in 'YYYY-MM-DD' format if generatePrintableStockOutHTML expects that for splitting.
+        // Firestore timestamps might need conversion. Assuming it's stored as a string 'YYYY-MM-DD' or compatible.
+        // If `formData.withdrawDate` is a Firestore Timestamp object, convert it:
+        // if (formData.withdrawDate && typeof formData.withdrawDate.toDate === 'function') {
+        //     const dateObj = formData.withdrawDate.toDate();
+        //     const year = dateObj.getFullYear();
+        //     const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        //     const day = String(dateObj.getDate()).padStart(2, '0');
+        //     formData.withdrawDate = `${year}-${month}-${day}`;
+        // }
+
+
+        const printableHTML = generatePrintableStockOutHTML(formData);
+        const printWindow = window.open('', '_blank', 'height=600,width=800');
+
+        if (printWindow) {
+            printWindow.document.write(printableHTML);
+            printWindow.document.close();
+            printWindow.focus();
+            // Some browsers might block print() if called too quickly or without user interaction.
+            // For re-printing, it's generally fine.
+            printWindow.print();
+        } else {
+            alert('Could not open print window. Please check your browser pop-up blocker settings.');
+        }
+
+    } catch (error) {
+        console.error("Error fetching or displaying stock out form:", error);
+        alert("An error occurred while trying to display the form: " + error.message);
+    }
+}
+
 function updateSummaryTotals() {
     const summaryTotalCartonsEl = document.getElementById('summary-total-cartons');
     const summaryTotalPalletsEl = document.getElementById('summary-total-pallets');
@@ -881,56 +1066,68 @@ async function initJordonTabs(containerElement) {
                 console.error('Further error details from handleStockInTabActivation:', error);
             });
     }
+
+    function handleReportTabActivation() {
+        console.log('Report tab is active, calling loadStockOutFormsReport().');
+        const reportContentContainer = document.getElementById('report-content-container'); // Assuming this ID exists or will be created in HTML
+        if (reportContentContainer) {
+            reportContentContainer.innerHTML = '<p>Loading reports...</p>'; // Show loading message
+        }
+        loadStockOutFormsReport()
+            .then(forms => {
+                displayStockOutFormsReport(forms);
+            })
+            .catch(error => {
+                console.error('Error loading or displaying stock out forms report:', error);
+                if (reportContentContainer) {
+                    reportContentContainer.innerHTML = '<p style="color: red;">Failed to load reports. Please try again.</p>';
+                }
+            });
+    }
     
     const summaryTableBody = document.getElementById('jordon-inventory-summary-tbody'); // For inventory summary loading message
 
     tabItems.forEach(tab => {
         tab.addEventListener('click', function() {
             activateJordonTab(this); 
-            if (this.dataset.tab === 'stock-in') {
+            const activeTab = this.dataset.tab;
+            if (activeTab === 'stock-in') {
                 handleStockInTabActivation();
-            } else if (this.dataset.tab === 'inventory-summary') {
-                // Loading message is now set inside loadInventorySummaryData
+            } else if (activeTab === 'inventory-summary') {
                 console.log('Inventory Summary tab selected, calling loadInventorySummaryData().');
                 loadInventorySummaryData()
-                    .then(items => {
-                        displayInventorySummary(items);
-                    })
-                    .catch(error => { // Error already handled and displayed by loadInventorySummaryData
-                         console.error('Further error details from inventory summary tab click:', error);
-                    });
+                    .then(displayInventorySummary)
+                    .catch(error => console.error('Error details from inventory summary tab click:', error));
+            } else if (activeTab === 'report') {
+                handleReportTabActivation();
             }
         });
     });
 
     const initiallyActiveTab = tabContainer.querySelector('.tab-item.active');
     if (initiallyActiveTab) {
-        activateJordonTab(initiallyActiveTab); 
-        if (initiallyActiveTab.dataset.tab === 'stock-in') {
-            handleStockInTabActivation();
-        } else if (initiallyActiveTab.dataset.tab === 'inventory-summary') {
-            // Loading message is now set inside loadInventorySummaryData
-            loadInventorySummaryData()
-                .then(items => {
-                    displayInventorySummary(items);
-                })
-                .catch(error => { // Error already handled
-                     console.error('Further error details from initial inventory summary load:', error);
-                });
+        const activeTabName = activateJordonTab(initiallyActiveTab);
+        if (activeTabName) { // activateJordonTab returns the content ID string or null
+            const tabType = initiallyActiveTab.dataset.tab;
+            if (tabType === 'stock-in') {
+                handleStockInTabActivation();
+            } else if (tabType === 'inventory-summary') {
+                loadInventorySummaryData().then(displayInventorySummary).catch(console.error);
+            } else if (tabType === 'report') {
+                handleReportTabActivation();
+            }
         }
     } else if (tabItems.length > 0) { 
-        activateJordonTab(tabItems[0]);
-        if (tabItems[0].dataset.tab === 'stock-in') {
-            handleStockInTabActivation();
-        } else if (tabItems[0].dataset.tab === 'inventory-summary') {
-            // Loading message is now set inside loadInventorySummaryData
-            loadInventorySummaryData()
-                .then(items => {
-                    displayInventorySummary(items);
-                })
-                .catch(error => { // Error already handled
-                    console.error('Further error details from first tab inventory summary load:', error);
-                });
+        const firstTabName = activateJordonTab(tabItems[0]);
+        if (firstTabName) {
+            const tabType = tabItems[0].dataset.tab;
+            if (tabType === 'stock-in') {
+                handleStockInTabActivation();
+            } else if (tabType === 'inventory-summary') {
+                loadInventorySummaryData().then(displayInventorySummary).catch(console.error);
+            } else if (tabType === 'report') {
+                handleReportTabActivation();
+            }
         }
     }
 
@@ -963,6 +1160,24 @@ async function initJordonTabs(containerElement) {
         console.warn('#stock-out-content div not found in containerElement for event delegation.');
     }
     renderStockOutPreview();
+
+    // Event listener for report content section
+    const reportContentDiv = document.getElementById('report-content');
+    if (reportContentDiv) {
+        reportContentDiv.addEventListener('click', function(event) {
+            if (event.target.classList.contains('view-stock-out-form-btn')) {
+                const formId = event.target.dataset.formId;
+                if (formId) {
+                    handleViewStockOutForm(formId);
+                } else {
+                    console.warn('View button clicked but form ID was missing.');
+                    alert('Could not retrieve form details: ID missing.');
+                }
+            }
+        });
+    } else {
+        console.warn('#report-content div not found for event delegation.');
+    }
 
     const stockOutListContainer = document.getElementById('stock-out-list-container');
     if (stockOutListContainer) {
