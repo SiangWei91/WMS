@@ -1,5 +1,261 @@
 // Jordon specific JavaScript
 
+// --- Jordon Inline Editing State ---
+let currentlyEditingRowId = null; // Stores the ID of the inventory item whose row is being edited
+
+// Combined click handler for inventory rows (single click for popup, Ctrl+click for edit)
+// This function is already being assigned as the 'click' event listener in displayInventorySummary
+// We will modify its content further down.
+// For now, we just need to ensure makeRowEditable and other helpers are defined before they might be called.
+
+function makeRowEditable(row) {
+    const item = currentInventorySummaryItems.find(i => i.id === row.dataset.itemId);
+    if (!item) return;
+
+    // Define cell indices based on the established mapping
+    const cellsToEdit = [
+        { index: 0, property: 'productCode', originalValueKey: 'originalProductCode', type: 'text', style: "width: 100px;" },
+        // Skipping Product Description (index 1) and Packing Size (index 2) as they are not directly editable
+        { index: 3, property: '_3plDetails.palletType', originalValueKey: 'originalPalletType', type: 'text', style: "width: 80px;" },
+        { index: 4, property: '_3plDetails.location', originalValueKey: 'originalLocation', type: 'text', style: "width: 100px;" },
+        { index: 5, property: '_3plDetails.lotNumber', originalValueKey: 'originalLotNumber', type: 'text', style: "width: 100px;" },
+        { index: 6, property: 'batchNo', originalValueKey: 'originalBatchNo', type: 'text', style: "width: 100px;" },
+        { index: 7, property: '_3plDetails.dateStored', originalValueKey: 'originalDateStored', type: 'text', style: "width: 100px;", placeholder: "DD/MM/YYYY" }, // Or type 'date' if direct date input is preferred and parsing handled
+        { index: 8, property: 'container', originalValueKey: 'originalContainer', type: 'text', style: "width: 100px;" },
+        { index: 9, property: 'quantity', originalValueKey: 'originalQuantity', type: 'number', style: "width: 80px; padding: 2px;", extraAttrs: `min="0"` },
+        { index: 10, property: '_3plDetails.pallet', originalValueKey: 'originalPallets', type: 'number', style: "width: 80px; padding: 2px;", extraAttrs: `min="0"` }
+    ];
+
+    cellsToEdit.forEach(config => {
+        const cell = row.cells[config.index];
+        if (!cell) {
+            console.error(`Cell at index ${config.index} not found for property ${config.property}`);
+            return; // Skip this cell if not found
+        }
+
+        // Resolve nested property for fetching current value
+        let currentValue = item;
+        config.property.split('.').forEach(part => {
+            if (currentValue && typeof currentValue === 'object') {
+                currentValue = currentValue[part];
+            } else {
+                currentValue = ''; // Default to empty if path is invalid
+            }
+        });
+        currentValue = (currentValue === null || currentValue === undefined) ? '' : currentValue;
+
+        row.dataset[config.originalValueKey] = cell.textContent; // Store original displayed text
+        
+        let placeholder = config.placeholder ? `placeholder="${config.placeholder}"` : "";
+        let extraAttrs = config.extraAttrs ? config.extraAttrs : "";
+        cell.innerHTML = `<input type="${config.type}" class="inline-edit-input" value="${escapeHtml(String(currentValue))}" style="${config.style || 'width: 100%; padding: 2px;'}" ${placeholder} ${extraAttrs}>`;
+    });
+
+    // Add Save and Cancel buttons
+    let actionsCell = row.querySelector('.inline-actions-cell');
+    if (actionsCell) {
+        actionsCell.innerHTML = ''; // Clear it before repopulating
+    } else {
+        actionsCell = row.insertCell(-1); // Add new cell at the end if it doesn't exist
+        actionsCell.classList.add('inline-actions-cell');
+    }
+    
+    actionsCell.innerHTML = `
+        <button class="btn btn-success btn-sm inline-save-btn" style="margin-right: 5px;">Save</button>
+        <button class="btn btn-danger btn-sm inline-cancel-btn">Cancel</button>
+    `;
+
+    actionsCell.querySelector('.inline-save-btn').addEventListener('click', () => saveRowChanges(row));
+    actionsCell.querySelector('.inline-cancel-btn').addEventListener('click', () => revertRowToStatic(row));
+}
+
+function revertRowToStatic(row, fromCancel = true) {
+    if (!row) return;
+    const itemId = row.dataset.itemId;
+    const item = currentInventorySummaryItems.find(i => i.id === itemId);
+    
+    // Define cell configurations similar to makeRowEditable for consistent access
+    const cellsToRevert = [
+        { index: 0, property: 'productCode', originalValueKey: 'originalProductCode' },
+        // Indices 1 (Product Desc) and 2 (Packing Size) are not edited, so no direct revert action needed for inputs
+        { index: 3, property: '_3plDetails.palletType', originalValueKey: 'originalPalletType' },
+        { index: 4, property: '_3plDetails.location', originalValueKey: 'originalLocation' },
+        { index: 5, property: '_3plDetails.lotNumber', originalValueKey: 'originalLotNumber' },
+        { index: 6, property: 'batchNo', originalValueKey: 'originalBatchNo' },
+        { index: 7, property: '_3plDetails.dateStored', originalValueKey: 'originalDateStored' },
+        { index: 8, property: 'container', originalValueKey: 'originalContainer' },
+        { index: 9, property: 'quantity', originalValueKey: 'originalQuantity' },
+        { index: 10, property: '_3plDetails.pallet', originalValueKey: 'originalPallets' }
+    ];
+
+    cellsToRevert.forEach(config => {
+        const cell = row.cells[config.index];
+        if (!cell) {
+            console.error(`Cell at index ${config.index} for reverting not found in row:`, row);
+            return; // Skip if cell doesn't exist
+        }
+
+        if (fromCancel && row.dataset[config.originalValueKey] !== undefined) {
+            cell.textContent = row.dataset[config.originalValueKey];
+        } else if (item) {
+            let valueToDisplay = item;
+            config.property.split('.').forEach(part => {
+                if (valueToDisplay && typeof valueToDisplay === 'object') {
+                    valueToDisplay = valueToDisplay[part];
+                } else {
+                    valueToDisplay = ''; // Default if path is invalid
+                }
+            });
+            cell.textContent = (valueToDisplay === null || valueToDisplay === undefined) ? '' : valueToDisplay;
+        } else {
+            // Fallback if item not found and not from cancel (should ideally not happen)
+            cell.textContent = row.dataset[config.originalValueKey] || 'Error';
+            console.warn(`Item not found for reverting ${config.property}, used original dataset value or error for row:`, itemId);
+        }
+        delete row.dataset[config.originalValueKey]; // Clean up dataset
+    });
+
+    const actionsCell = row.querySelector('.inline-actions-cell');
+    if (actionsCell) {
+        actionsCell.innerHTML = ''; // Remove Save/Cancel buttons
+    }
+
+    if (currentlyEditingRowId === itemId) {
+        currentlyEditingRowId = null;
+    }
+}
+
+async function saveRowChanges(row) {
+    const itemId = row.dataset.itemId;
+    const itemIndex = currentInventorySummaryItems.findIndex(i => i.id === itemId);
+    if (itemIndex === -1) {
+        alert("Error: Could not find item to save.");
+        revertRowToStatic(row); // Revert UI
+        return;
+    }
+
+    // Configuration for fields to save, matching makeRowEditable and Firestore structure
+    const fieldsToSave = [
+        { index: 0, property: 'productCode', type: 'text' },
+        { index: 3, property: '_3plDetails.palletType', type: 'text' },
+        { index: 4, property: '_3plDetails.location', type: 'text' },
+        { index: 5, property: '_3plDetails.lotNumber', type: 'text' },
+        { index: 6, property: 'batchNo', type: 'text' },
+        { index: 7, property: '_3plDetails.dateStored', type: 'text' }, // Assuming text input for DD/MM/YYYY
+        { index: 8, property: 'container', type: 'text' },
+        { index: 9, property: 'quantity', type: 'number' },
+        { index: 10, property: '_3plDetails.pallet', type: 'number' }
+    ];
+
+    const updateDataFirestore = {};
+    const updateDataLocal = {};
+    let validationFailed = false;
+
+    fieldsToSave.forEach(config => {
+        const cell = row.cells[config.index];
+        const input = cell ? cell.querySelector('input') : null;
+        if (!input) {
+            console.error(`Input field not found for property ${config.property} at index ${config.index}.`);
+            // This case should ideally not be reached if makeRowEditable worked.
+            // If it does, it implies a state mismatch. For now, we'll skip this field.
+            return; 
+        }
+
+        let value = input.value;
+        if (config.type === 'number') {
+            value = parseInt(value, 10);
+            if (isNaN(value) || value < 0) {
+                alert(`Invalid input for ${config.property.split('.').pop()}. Must be a non-negative number.`);
+                validationFailed = true;
+                return; // Stop processing this field
+            }
+        }
+        // Add more specific validation if needed (e.g., date format for dateStored)
+
+        // For Firestore, use dot notation for nested fields
+        updateDataFirestore[config.property] = value;
+
+        // For local update, handle nesting
+        const parts = config.property.split('.');
+        let currentLocal = updateDataLocal;
+        for (let i = 0; i < parts.length - 1; i++) {
+            if (!currentLocal[parts[i]]) currentLocal[parts[i]] = {};
+            currentLocal = currentLocal[parts[i]];
+        }
+        currentLocal[parts[parts.length - 1]] = value;
+    });
+
+    if (validationFailed) {
+        // Do not revert here, allow user to correct.
+        return; 
+    }
+
+    // Add lastModifiedAt timestamp for Firestore
+    updateDataFirestore['lastModifiedAt'] = firebase.firestore.FieldValue.serverTimestamp();
+
+    // Get a deep copy of the original item for potential revert on error
+    const originalItemData = JSON.parse(JSON.stringify(currentInventorySummaryItems[itemIndex])); 
+
+    // Show loading/saving indicator
+    const saveButton = row.querySelector('.inline-save-btn');
+    if (saveButton) {
+        saveButton.textContent = 'Saving...';
+        saveButton.disabled = true;
+    }
+
+    // Update Firestore
+    try {
+        const db = firebase.firestore();
+        const itemRef = db.collection('inventory').doc(itemId);
+        await itemRef.update(updateDataFirestore);
+
+        // Update local cache after successful Firestore update
+        // Merge updateDataLocal into currentInventorySummaryItems[itemIndex]
+        const itemToUpdate = currentInventorySummaryItems[itemIndex];
+        Object.keys(updateDataLocal).forEach(key => {
+            if (key === '_3plDetails') { // Handle nesting for _3plDetails
+                if (!itemToUpdate._3plDetails) itemToUpdate._3plDetails = {};
+                Object.assign(itemToUpdate._3plDetails, updateDataLocal._3plDetails);
+            } else {
+                itemToUpdate[key] = updateDataLocal[key];
+            }
+        });
+        itemToUpdate.lastModifiedAt = new Date(); // Approximate client-side timestamp
+
+        alert('Item updated successfully!');
+        revertRowToStatic(row, false); // Revert to static using the new data
+        updateSummaryTotals(); 
+    } catch (error) {
+        console.error("Error updating item in Firestore:", error);
+        alert("Error updating item: " + error.message + ". Reverting changes in UI.");
+        // No need to revert currentInventorySummaryItems as we haven't modified it directly yet with new values
+        // The UI revert should use the original values stored in row.dataset
+        revertRowToStatic(row, true); // Revert UI to original values before edit attempt
+        
+        // Restore save button state
+        if (saveButton) {
+            saveButton.textContent = 'Save';
+            saveButton.disabled = false;
+        }
+    }
+}
+
+function updateSummaryTotals() {
+    const summaryTotalCartonsEl = document.getElementById('summary-total-cartons');
+    const summaryTotalPalletsEl = document.getElementById('summary-total-pallets');
+    if (!summaryTotalCartonsEl || !summaryTotalPalletsEl) return;
+
+    let totalCartons = 0;
+    let totalPallets = 0;
+    currentInventorySummaryItems.forEach(item => {
+        totalCartons += Number(item.quantity) || 0;
+        totalPallets += (item._3plDetails && item._3plDetails.pallet !== undefined ? Number(item._3plDetails.pallet) : 0);
+    });
+    summaryTotalCartonsEl.textContent = totalCartons;
+    summaryTotalPalletsEl.textContent = totalPallets;
+}
+// End of Inline Editing Functions
+
 let currentInventorySummaryItems = [];
 let jordonStockOutItems = []; // Array to store items added to the stock out list
 let mainWarehouses = []; // Array to store main warehouse data
@@ -560,7 +816,8 @@ function displayInventorySummary(summaryItems) {
         }
 
         if (stockOutPopup) { 
-             row.addEventListener('click', handleInventoryRowClick);
+             row.addEventListener('click', handleInventoryRowClick); // Changed: This will now handle both single and Ctrl+click
+             // row.addEventListener('dblclick', handleInventoryRowDoubleClick); // Removed dblclick listener
         }
     });
 
@@ -752,162 +1009,170 @@ async function initJordonTabs(containerElement) {
  */
 function handleInventoryRowClick(event) {
     const row = event.currentTarget;
-    const stockOutPopup = document.getElementById('stock-out-popup');
+    const itemId = row.dataset.itemId;
 
-    if (!stockOutPopup) {
-        console.error("Cannot handle row click: Stock out popup not found.");
-        return;
-    }
+    if (event.ctrlKey) {
+        // Ctrl+Click: Enter or manage edit mode
+        event.preventDefault(); // Prevent any default ctrl+click behavior (like opening context menu on some systems)
 
-    const clickedMixedPalletGroupId = row.dataset.mixedPalletGroupId;
-    const clickedLotNumber = row.dataset.lotNumber;
-    const clickedDateStored = row.dataset.dateStored; // Added this line
-    const clickedItemId = row.dataset.itemId;
-
-    let itemsForPopup = [];
-
-    // Prepare the originally clicked item
-    const originalItem = {
-        id: clickedItemId,
-        productCode: row.dataset.productCode,
-        productName: row.dataset.productName,
-        productPackaging: row.dataset.productPackaging, // Added for consistency
-        _3plDetails: { // Structure to match items in currentInventorySummaryItems
-            palletType: row.dataset.palletType,
-            location: row.dataset.location,
-            lotNumber: clickedLotNumber,
-            dateStored: row.dataset.dateStored,
-            mixedPalletGroupId: clickedMixedPalletGroupId, // Ensure this is part of the object
-            pallet: row.dataset.pallets || '0', // Ensure pallet info is here
-        },
-        batchNo: row.dataset.batchNo,
-        container: row.dataset.container, // Added for consistency
-        quantity: parseInt(row.dataset.quantity, 10),
-        productId: row.dataset.productId, // Added for consistency
-        // Note: 'pallets' from row.dataset is stored inside _3plDetails.pallet for this object
-    };
-    itemsForPopup.push(originalItem);
-
-    // Filtering Logic
-    if (clickedMixedPalletGroupId && clickedMixedPalletGroupId.trim() !== '') {
-        const matchingItems = currentInventorySummaryItems.filter(item => {
-            return item._3plDetails &&
-                   item._3plDetails.mixedPalletGroupId === clickedMixedPalletGroupId &&
-                   item._3plDetails.dateStored === clickedDateStored && // Changed condition here
-                   item.id !== clickedItemId; // Exclude the already added original item
-        });
-        itemsForPopup = itemsForPopup.concat(matchingItems);
-    }
-
-    console.log("Items for popup:", itemsForPopup);
-
-    const popupInfoSection = stockOutPopup.querySelector('.popup-info-section');
-    if (!popupInfoSection) {
-        console.error("Popup info section (.popup-info-section) not found within the stock out popup.");
-        // Display the popup anyway, but it will be missing item details
-        stockOutPopup.style.display = 'block';
-        return;
-    }
-    popupInfoSection.innerHTML = ''; // Clear previous dynamic content
-
-    itemsForPopup.forEach((itemObject, index) => {
-        const itemDetailContainer = document.createElement('div');
-        itemDetailContainer.className = 'popup-item-details';
-
-        const fieldsToShow = [
-            { label: 'Item Code :', value: itemObject.productCode },
-            { label: 'Product Description :', value: itemObject.productName },
-            { label: 'Location :', value: (itemObject._3plDetails && itemObject._3plDetails.location) || '' },
-            { label: 'Lot Number :', value: (itemObject._3plDetails && itemObject._3plDetails.lotNumber) || '' },
-            { label: 'Batch Number :', value: itemObject.batchNo || '' },
-            { label: 'Current Quantity :', value: itemObject.quantity },
-            { label: 'Current Pallets :', value: (itemObject._3plDetails && itemObject._3plDetails.pallet) || '0' }
-        ];
-
-        fieldsToShow.forEach(field => {
-            const lineDiv = document.createElement('div');
-            lineDiv.className = 'popup-info-line';
-
-            const labelSpan = document.createElement('span');
-            labelSpan.className = 'popup-label';
-            labelSpan.textContent = field.label;
-
-            const valueSpan = document.createElement('span');
-            valueSpan.className = 'popup-value';
-            valueSpan.textContent = escapeHtml(String(field.value));
-
-            lineDiv.appendChild(labelSpan);
-            lineDiv.appendChild(valueSpan);
-            itemDetailContainer.appendChild(lineDiv);
-        });
-
-        popupInfoSection.appendChild(itemDetailContainer);
-
-        // Create and append input group for the current itemObject to popupInfoSection
-        const itemInputGroup = document.createElement('div');
-        itemInputGroup.className = 'popup-item-input-group';
-
-        // Quantity Input
-        const qtyLabel = document.createElement('label');
-        qtyLabel.setAttribute('for', `stock-out-quantity-${itemObject.id}`);
-        qtyLabel.textContent = `Quantity for ${itemObject.productCode} (Lot: ${itemObject._3plDetails?.lotNumber || 'N/A'}):`;
-        
-        const qtyInput = document.createElement('input');
-        qtyInput.type = 'number';
-        qtyInput.id = `stock-out-quantity-${itemObject.id}`;
-        qtyInput.name = `stock-out-quantity-${itemObject.id}`;
-        qtyInput.className = 'dynamic-stock-out-quantity';
-        // Set data attributes (copied from the deleted loop)
-        qtyInput.dataset.itemId = itemObject.id;
-        qtyInput.dataset.productId = itemObject.productId || '';
-        qtyInput.dataset.productCode = itemObject.productCode || '';
-        qtyInput.dataset.productName = itemObject.productName || 'N/A';
-        qtyInput.dataset.batchNo = itemObject.batchNo || '';
-        qtyInput.dataset.warehouseId = 'jordon';
-        qtyInput.dataset.currentQuantity = itemObject.quantity !== undefined ? itemObject.quantity : 0;
-        qtyInput.dataset.location = (itemObject._3plDetails && itemObject._3plDetails.location) || '';
-        qtyInput.dataset.lotNumber = (itemObject._3plDetails && itemObject._3plDetails.lotNumber) || '';
-        qtyInput.dataset.productPackaging = itemObject.productPackaging || 'N/A';
-        qtyInput.dataset.palletType = (itemObject._3plDetails && itemObject._3plDetails.palletType) || '';
-        qtyInput.dataset.container = itemObject.container || '';
-        qtyInput.dataset.dateStored = (itemObject._3plDetails && itemObject._3plDetails.dateStored) || '';
-        qtyInput.dataset.currentPallets = (itemObject._3plDetails && itemObject._3plDetails.pallet) || '0';
-
-        // Pallet ID Input
-        const palletLabel = document.createElement('label');
-        palletLabel.setAttribute('for', `stock-out-pallet-${itemObject.id}`);
-        palletLabel.textContent = `Pallet ID for ${itemObject.productCode} (Lot: ${itemObject._3plDetails?.lotNumber || 'N/A'}):`;
-
-        const palletInput = document.createElement('input');
-        palletInput.type = 'text';
-        palletInput.id = `stock-out-pallet-${itemObject.id}`;
-        palletInput.name = `stock-out-pallet-${itemObject.id}`;
-        palletInput.className = 'dynamic-stock-out-pallet-id';
-        palletInput.dataset.itemId = itemObject.id; // Link to the item
-
-        itemInputGroup.appendChild(qtyLabel);
-        itemInputGroup.appendChild(qtyInput);
-        itemInputGroup.appendChild(document.createElement('br')); // Simple spacing
-        itemInputGroup.appendChild(palletLabel);
-        itemInputGroup.appendChild(palletInput);
-        
-        popupInfoSection.appendChild(itemInputGroup);
-        // itemInputGroup.style.marginBottom = '20px'; // Add spacing after the input group - Replaced by separator logic
-
-        // Add separator for the entire item block (details + inputs) if multiple items
-        if (itemsForPopup.length > 1 && index < itemsForPopup.length - 1) {
-            itemInputGroup.style.paddingBottom = '15px';
-            itemInputGroup.style.marginBottom = '15px';
-            itemInputGroup.style.borderBottom = '1px solid #ccc';
+        if (currentlyEditingRowId === itemId) {
+            return; // Row is already in edit mode, do nothing further on ctrl+click
         }
-    });
-    
-    // Retain general context on the popup dataset
-    stockOutPopup.dataset.clickedMixedPalletGroupId = clickedMixedPalletGroupId;
-    stockOutPopup.dataset.clickedItemId = clickedItemId;
-    
-    // Display the popup
-    stockOutPopup.style.display = 'block';
+        if (currentlyEditingRowId && currentlyEditingRowId !== itemId) {
+            // Another row is being edited, revert it first
+            const previousEditingRow = document.querySelector(`#jordon-inventory-summary-tbody tr[data-item-id="${currentlyEditingRowId}"]`);
+            if (previousEditingRow) {
+                revertRowToStatic(previousEditingRow);
+            }
+        }
+        currentlyEditingRowId = itemId;
+        makeRowEditable(row);
+
+    } else {
+        // Single Click (no Ctrl): Show stock-out popup
+        // Ensure row is not in edit mode before showing popup
+        if (currentlyEditingRowId === itemId) {
+             // If the clicked row is the one being edited, do not show the popup.
+             // User should save or cancel edit mode first.
+            return;
+        }
+        // If another row is being edited, revert it before showing popup for the current row.
+        if (currentlyEditingRowId && currentlyEditingRowId !== itemId) {
+            const previousEditingRow = document.querySelector(`#jordon-inventory-summary-tbody tr[data-item-id="${currentlyEditingRowId}"]`);
+            if (previousEditingRow) {
+                revertRowToStatic(previousEditingRow);
+            }
+        }
+
+
+        const stockOutPopup = document.getElementById('stock-out-popup');
+        if (!stockOutPopup) {
+            console.error("Cannot handle row click: Stock out popup not found.");
+            return;
+        }
+
+        const clickedMixedPalletGroupId = row.dataset.mixedPalletGroupId;
+        const clickedLotNumber = row.dataset.lotNumber;
+        const clickedDateStored = row.dataset.dateStored;
+        const clickedItemId = itemId; // Use itemId from the top
+
+        let itemsForPopup = [];
+        const originalItem = {
+            id: clickedItemId,
+            productCode: row.dataset.productCode,
+            productName: row.dataset.productName,
+            productPackaging: row.dataset.productPackaging,
+            _3plDetails: {
+                palletType: row.dataset.palletType,
+                location: row.dataset.location,
+                lotNumber: clickedLotNumber,
+                dateStored: clickedDateStored,
+                mixedPalletGroupId: clickedMixedPalletGroupId,
+                pallet: row.dataset.pallets || '0',
+            },
+            batchNo: row.dataset.batchNo,
+            container: row.dataset.container,
+            quantity: parseInt(row.dataset.quantity, 10),
+            productId: row.dataset.productId,
+        };
+        itemsForPopup.push(originalItem);
+
+        if (clickedMixedPalletGroupId && clickedMixedPalletGroupId.trim() !== '') {
+            const matchingItems = currentInventorySummaryItems.filter(item => {
+                return item._3plDetails &&
+                       item._3plDetails.mixedPalletGroupId === clickedMixedPalletGroupId &&
+                       item._3plDetails.dateStored === clickedDateStored &&
+                       item.id !== clickedItemId;
+            });
+            itemsForPopup = itemsForPopup.concat(matchingItems);
+        }
+
+        const popupInfoSection = stockOutPopup.querySelector('.popup-info-section');
+        if (!popupInfoSection) {
+            stockOutPopup.style.display = 'block';
+            return;
+        }
+        popupInfoSection.innerHTML = '';
+
+        itemsForPopup.forEach((itemObject, index) => {
+            const itemDetailContainer = document.createElement('div');
+            itemDetailContainer.className = 'popup-item-details';
+            const fieldsToShow = [
+                { label: 'Item Code :', value: itemObject.productCode },
+                { label: 'Product Description :', value: itemObject.productName },
+                { label: 'Location :', value: (itemObject._3plDetails && itemObject._3plDetails.location) || '' },
+                { label: 'Lot Number :', value: (itemObject._3plDetails && itemObject._3plDetails.lotNumber) || '' },
+                { label: 'Batch Number :', value: itemObject.batchNo || '' },
+                { label: 'Current Quantity :', value: itemObject.quantity },
+                { label: 'Current Pallets :', value: (itemObject._3plDetails && itemObject._3plDetails.pallet) || '0' }
+            ];
+            fieldsToShow.forEach(field => {
+                const lineDiv = document.createElement('div');
+                lineDiv.className = 'popup-info-line';
+                const labelSpan = document.createElement('span');
+                labelSpan.className = 'popup-label';
+                labelSpan.textContent = field.label;
+                const valueSpan = document.createElement('span');
+                valueSpan.className = 'popup-value';
+                valueSpan.textContent = escapeHtml(String(field.value));
+                lineDiv.appendChild(labelSpan);
+                lineDiv.appendChild(valueSpan);
+                itemDetailContainer.appendChild(lineDiv);
+            });
+            popupInfoSection.appendChild(itemDetailContainer);
+
+            const itemInputGroup = document.createElement('div');
+            itemInputGroup.className = 'popup-item-input-group';
+            const qtyLabel = document.createElement('label');
+            qtyLabel.setAttribute('for', `stock-out-quantity-${itemObject.id}`);
+            qtyLabel.textContent = `Quantity for ${itemObject.productCode} (Lot: ${itemObject._3plDetails?.lotNumber || 'N/A'}):`;
+            const qtyInput = document.createElement('input');
+            qtyInput.type = 'number';
+            qtyInput.id = `stock-out-quantity-${itemObject.id}`;
+            qtyInput.name = `stock-out-quantity-${itemObject.id}`;
+            qtyInput.className = 'dynamic-stock-out-quantity';
+            Object.assign(qtyInput.dataset, {
+                itemId: itemObject.id,
+                productId: itemObject.productId || '',
+                productCode: itemObject.productCode || '',
+                productName: itemObject.productName || 'N/A',
+                batchNo: itemObject.batchNo || '',
+                warehouseId: 'jordon',
+                currentQuantity: itemObject.quantity !== undefined ? itemObject.quantity : 0,
+                location: (itemObject._3plDetails && itemObject._3plDetails.location) || '',
+                lotNumber: (itemObject._3plDetails && itemObject._3plDetails.lotNumber) || '',
+                productPackaging: itemObject.productPackaging || 'N/A',
+                palletType: (itemObject._3plDetails && itemObject._3plDetails.palletType) || '',
+                container: itemObject.container || '',
+                dateStored: (itemObject._3plDetails && itemObject._3plDetails.dateStored) || '',
+                currentPallets: (itemObject._3plDetails && itemObject._3plDetails.pallet) || '0'
+            });
+            const palletLabel = document.createElement('label');
+            palletLabel.setAttribute('for', `stock-out-pallet-${itemObject.id}`);
+            palletLabel.textContent = `Pallet ID for ${itemObject.productCode} (Lot: ${itemObject._3plDetails?.lotNumber || 'N/A'}):`;
+            const palletInput = document.createElement('input');
+            palletInput.type = 'text';
+            palletInput.id = `stock-out-pallet-${itemObject.id}`;
+            palletInput.name = `stock-out-pallet-${itemObject.id}`;
+            palletInput.className = 'dynamic-stock-out-pallet-id';
+            palletInput.dataset.itemId = itemObject.id;
+            itemInputGroup.append(qtyLabel, qtyInput, document.createElement('br'), palletLabel, palletInput);
+            popupInfoSection.appendChild(itemInputGroup);
+            if (itemsForPopup.length > 1 && index < itemsForPopup.length - 1) {
+                itemInputGroup.style.paddingBottom = '15px';
+                itemInputGroup.style.marginBottom = '15px';
+                itemInputGroup.style.borderBottom = '1px solid #ccc';
+            }
+        });
+        
+        stockOutPopup.dataset.clickedMixedPalletGroupId = clickedMixedPalletGroupId;
+        stockOutPopup.dataset.clickedItemId = clickedItemId;
+        stockOutPopup.style.display = 'block';
+        const firstQtyInput = stockOutPopup.querySelector('.dynamic-stock-out-quantity');
+        if (firstQtyInput) {
+            firstQtyInput.focus();
+        }
+    }
 }
 
 /**
@@ -999,17 +1264,6 @@ function handleAddToStockOutList() {
     }
 
     jordonStockOutItems.push(...itemsToAdd);
-
-
-    // If this is the first item added (or first batch), switch to the "Stock Out" tab
-    if (jordonStockOutItems.length > 0 && itemsToAdd.length > 0) { // Check if new items were actually added
-        const stockOutTabButton = document.querySelector('.tab-item[data-tab="stock-out"]');
-        if (stockOutTabButton) {
-            activateJordonTab(stockOutTabButton);
-        } else {
-            console.error("Could not find 'Stock Out' tab button to activate.");
-        }
-    }
     
     renderStockOutPreview(); // Update the displayed list of items to be stocked out
 
@@ -1272,16 +1526,29 @@ async function handleSubmitAllStockOut() {
 
     // Get New Field Values
     const withdrawDateInput = document.getElementById('withdraw-date');
-    const collectionTimeInput = document.getElementById('collection-time');
     const withdrawDate = withdrawDateInput ? withdrawDateInput.value : '';
-    const collectionTime = collectionTimeInput ? collectionTimeInput.value : '';
 
-    // Validation (Basic)
+    const hhInput = document.getElementById('collection-time-hh');
+    const mmInput = document.getElementById('collection-time-mm');
+    const ampmInput = document.getElementById('collection-time-ampm');
+
+    const hh = hhInput ? hhInput.value : '';
+    const mm = mmInput ? mmInput.value : '';
+    const ampm = ampmInput ? ampmInput.value : '';
+
+    // Validation for withdraw date and collection time
     if (!withdrawDate) {
         alert("Withdraw Date is required.");
-        // Button is re-enabled in finally block
+        if (submitButton) { submitButton.disabled = false; submitButton.textContent = 'Submit All Stock Out';}
         return;
     }
+    if (!hh || !mm) { // AM/PM defaults to AM so it will always have a value
+        alert("Please select a valid Collection Time (HH:MM).");
+        if (submitButton) { submitButton.disabled = false; submitButton.textContent = 'Submit All Stock Out';}
+        return;
+    }
+    
+    const collectionTime = `${hh}:${mm} ${ampm}`;
 
     // Get Serial Number
     const serialNumber = await getNextSerialNumber();
@@ -1339,7 +1606,10 @@ async function handleSubmitAllStockOut() {
     // Clear Form and UI
     jordonStockOutItems = [];
     renderStockOutPreview();
-    if (collectionTimeInput) collectionTimeInput.value = '';
+    // Reset collection time inputs
+    if (hhInput) hhInput.value = '';
+    if (mmInput) mmInput.value = '';
+    if (ampmInput) ampmInput.value = 'AM'; // Default to AM
     setDefaultWithdrawDate(); // Reset withdraw date to default
 
     // if (!confirm("Are you sure you want to submit these stock out items?")) {
