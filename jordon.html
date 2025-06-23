@@ -84,10 +84,37 @@
     <div class="tab-content" id="stock-out-content">
       <h2>Stock Out</h2>
       <div id="stock-out-controls" style="padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; background-color: #f9f9f9;">
-        <label for="withdraw-date" style="margin-right: 5px;">Withdraw Date:</label>
-        <input type="date" id="withdraw-date" style="margin-right: 15px;">
-        <label for="collection-time" style="margin-right: 5px;">Collection Time:</label>
-        <input type="text" id="collection-time" placeholder="HH:MM AM/PM">
+        <label for="withdraw-date">Withdraw Date:</label>
+        <input type="date" id="withdraw-date">
+        
+        <div class="collection-time-group">
+            <label for="collection-time-hh">Collection Time:</label>
+            <select id="collection-time-hh">
+              <option value="">HH</option>
+              <option value="01">01</option>
+              <option value="02">02</option>
+              <option value="03">03</option>
+              <option value="04">04</option>
+              <option value="05">05</option>
+              <option value="06">06</option>
+              <option value="07">07</option>
+              <option value="08">08</option>
+              <option value="09">09</option>
+              <option value="10">10</option>
+              <option value="11">11</option>
+              <option value="12">12</option>
+            </select>
+            <label for="collection-time-mm" class="time-colon">:</label>
+            <select id="collection-time-mm">
+              <option value="">MM</option>
+              <option value="00">00</option>
+              <option value="30">30</option>
+            </select>
+            <select id="collection-time-ampm">
+              <option value="AM">AM</option>
+              <option value="PM">PM</option>
+            </select>
+        </div>
       </div>
       <div id="stock-out-list-container">
         <!-- Stock out list table will be rendered here by js/jordon.js -->
