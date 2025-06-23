@@ -546,6 +546,23 @@ async function handleUpdateInventoryClick() { // Made async
                 const newInventoryDocRef = db.collection('inventory').doc(); // Creates a new unique ID for the doc
                 batch.set(newInventoryDocRef, inventoryDoc);
                 totalItemsToUpdate++;
+
+                // --- ADD TRANSACTION DOC ---
+                const transactionDoc = {
+                    productCode: inventoryDoc.productCode,
+                    productName: productInfo.productName, // From lookupOrCreateProduct
+                    warehouseId: inventoryDoc.warehouseId,
+                    quantity: inventoryDoc.quantity,
+                    batchNo: inventoryDoc.batchNo, // Added batchNo to transaction
+                    transactionDate: firebase.firestore.FieldValue.serverTimestamp(),
+                    type: 'inbound', // Assuming new shipments are 'inbound'
+                    operatorId: 'system', // Placeholder for operator
+                    // Other fields like 'details' or 'referenceId' can be added if needed
+                };
+                const newTransactionDocRef = db.collection('transactions').doc();
+                batch.set(newTransactionDocRef, transactionDoc);
+                // --- END ADD TRANSACTION DOC ---
+
                 // --- END NEW LOGIC PER ITEM ---
             } // End of for...of loop for items
         } // End of if (dataForThisView && dataForThisView.length > 0)
