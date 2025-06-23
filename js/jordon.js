@@ -387,11 +387,27 @@ async function handleViewStockOutForm(formId) {
         // If items within formData are structured differently than what generatePrintableStockOutHTML expects,
         // you might need to transform them here. Assuming the structure is compatible.
 
-        if (!formData.items || !Array.isArray(formData.items)) {
-            console.error("Form data is missing 'items' array or it's not an array:", formData);
-            alert("Error: The form data is incomplete or corrupted. Cannot display items.");
+        let itemsArray = formData.items;
+        // Check if items is an object (map) and not an array, then convert
+        if (formData.items && typeof formData.items === 'object' && !Array.isArray(formData.items)) {
+            // console.log("formData.items is an object/map, converting to array for printing.");
+            // Attempt to convert, assuming keys are somewhat ordered or order isn't critical for display here.
+            // If keys are numerical strings "0", "1", "2", sorting might be better.
+            itemsArray = Object.keys(formData.items)
+                .sort((a, b) => parseInt(a) - parseInt(b)) // Sort by numerical key "0", "1", ...
+                .map(key => formData.items[key]);
+        }
+
+        if (!itemsArray || !Array.isArray(itemsArray) || itemsArray.length === 0) {
+            console.error("Form data 'items' is not a valid array or is empty after potential conversion:", itemsArray, "Original formData.items:", formData.items);
+            alert("Error: The form data (items) is incomplete, corrupted, or empty. Cannot display items.");
             return;
         }
+        
+        // Create a new formData object for printing that definitely has 'items' as an array
+        const formDataForPrint = { ...formData, items: itemsArray };
+
+        // console.log("Data being sent to generatePrintableStockOutHTML:", JSON.stringify(formDataForPrint, null, 2));
         
         // Ensure withdrawDate is in 'YYYY-MM-DD' format if generatePrintableStockOutHTML expects that for splitting.
         // Firestore timestamps might need conversion. Assuming it's stored as a string 'YYYY-MM-DD' or compatible.
@@ -405,7 +421,7 @@ async function handleViewStockOutForm(formId) {
         // }
 
 
-        const printableHTML = generatePrintableStockOutHTML(formData);
+        const printableHTML = generatePrintableStockOutHTML(formDataForPrint); // Use the modified formData
         const printWindow = window.open('', '_blank', 'height=600,width=800');
 
         if (printWindow) {
@@ -496,7 +512,7 @@ function generatePrintableStockOutHTML(formData) {
                 <td style="font-size: 9pt;">${escapeHtml(item.productPackaging)}</td> <!-- Smaller packing size font -->
                 <td>${escapeHtml(item.location)}</td>
                 <td>${escapeHtml(item.lotNumber)}</td>
-                <td>${escapeHtml(item.palletId)}</td> 
+                <td>${escapeHtml(item.palletsToStockOut)}</td> <!-- Changed from palletId to palletsToStockOut -->
                 <td>${escapeHtml(item.quantityToStockOut)}</td>
                 <td>${escapeHtml(item.batchNumber)}</td>
             </tr>
@@ -876,18 +892,20 @@ async function loadInventorySummaryData() {
             productId = null; // Reset for each item
 
             if (inventoryItem.productCode) {
+
                 const productsRef = db.collection('products');
                 const productQuery = productsRef.where('productCode', '==', inventoryItem.productCode).limit(1);
                 const productSnapshot = await productQuery.get();
 
                 if (!productSnapshot.empty) {
                     const productDoc = productSnapshot.docs[0];
-                    const productData = productDoc.data();
-                    productName = productData.name || 'N/A';
-                    productPackaging = productData.packaging || 'N/A';
-                    productId = productDoc.id; 
+                    const productDataFromDoc = productDoc.data(); // Correctly get data object
+                    productName = productDataFromDoc.name || 'N/A'; // Use the correct variable
+                    productPackaging = productDataFromDoc.packaging || 'N/A'; // Use the correct variable
+                    productId = productDoc.id;
                 } else {
                     console.warn(`Product details not found for productCode: ${inventoryItem.productCode} during summary load.`);
+                    // productId remains null
                 }
             } else {
                 console.warn(`Inventory item ${inventoryItem.id} missing productCode during summary load.`);
@@ -1363,14 +1381,19 @@ function handleInventoryRowClick(event) {
                 currentPallets: (itemObject._3plDetails && itemObject._3plDetails.pallet) || '0'
             });
             const palletLabel = document.createElement('label');
-            palletLabel.setAttribute('for', `stock-out-pallet-${itemObject.id}`);
-            palletLabel.textContent = `Pallet ID for ${itemObject.productCode} (Lot: ${itemObject._3plDetails?.lotNumber || 'N/A'}):`;
+            palletLabel.setAttribute('for', `stock-out-pallet-quantity-${itemObject.id}`); // Changed ID reference
+            palletLabel.textContent = `Pallets to Stock Out (for ${itemObject.productCode}, Lot: ${itemObject._3plDetails?.lotNumber || 'N/A'}):`; // Changed label
             const palletInput = document.createElement('input');
-            palletInput.type = 'text';
-            palletInput.id = `stock-out-pallet-${itemObject.id}`;
-            palletInput.name = `stock-out-pallet-${itemObject.id}`;
-            palletInput.className = 'dynamic-stock-out-pallet-id';
-            palletInput.dataset.itemId = itemObject.id;
+            palletInput.type = 'number'; // Changed type to number
+            palletInput.id = `stock-out-pallet-quantity-${itemObject.id}`; // Changed ID
+            palletInput.name = `stock-out-pallet-quantity-${itemObject.id}`; // Changed name
+            palletInput.className = 'dynamic-stock-out-pallet-quantity'; // Changed class name
+            palletInput.min = "0"; // Prevent negative numbers
+            // We might want to set a max based on currentPallets later, or validate in handleAddToStockOutList
+            palletInput.dataset.itemId = itemObject.id; 
+            // Add current pallets info to dataset for validation access later if needed, though currentPallets is on qtyInput.dataset
+            // palletInput.dataset.currentPallets = qtyInput.dataset.currentPallets; 
+
             itemInputGroup.append(qtyLabel, qtyInput, document.createElement('br'), palletLabel, palletInput);
             popupInfoSection.appendChild(itemInputGroup);
             if (itemsForPopup.length > 1 && index < itemsForPopup.length - 1) {
@@ -1398,48 +1421,83 @@ function handleInventoryRowClick(event) {
 function handleAddToStockOutList() {
     const stockOutPopup = document.getElementById('stock-out-popup');
     const dynamicQuantityInputs = stockOutPopup.querySelectorAll('.dynamic-stock-out-quantity');
-    const dynamicPalletIdInputs = stockOutPopup.querySelectorAll('.dynamic-stock-out-pallet-id');
+    // Query for the new class name for pallet quantity inputs
+    const dynamicPalletQuantityInputs = stockOutPopup.querySelectorAll('.dynamic-stock-out-pallet-quantity');
 
     if (!stockOutPopup || dynamicQuantityInputs.length === 0) {
         console.error("Popup or dynamic quantity inputs not found.");
         alert("Error: Could not process the request. Popup input elements missing.");
         return;
     }
+    // Ensure we have a corresponding pallet quantity input for each quantity input
+    if (dynamicQuantityInputs.length !== dynamicPalletQuantityInputs.length) {
+        console.error("Mismatch between quantity inputs and pallet quantity inputs.");
+        alert("Error: UI inconsistency for stock out inputs. Please refresh.");
+        return;
+    }
 
     let allItemsValid = true;
     const itemsToAdd = [];
 
-    dynamicQuantityInputs.forEach(qtyInput => {
+    dynamicQuantityInputs.forEach((qtyInput, index) => {
         const itemId = qtyInput.dataset.itemId;
-        const palletInput = stockOutPopup.querySelector(`#stock-out-pallet-${itemId}`); // Find corresponding pallet input
+        // Get the corresponding pallet quantity input using the index or by matching itemId if IDs are consistent
+        const palletQtyInput = stockOutPopup.querySelector(`#stock-out-pallet-quantity-${itemId}`); 
 
         const quantityToStockOut = parseInt(qtyInput.value, 10);
-        const palletId = palletInput ? palletInput.value.trim() : ""; // Get palletId, ensure palletInput exists
-        
-        const currentQuantity = parseInt(qtyInput.dataset.currentQuantity, 10);
-
-        // Validate Input: Quantity must be a positive number (or zero if allowed, but typically > 0 for stock out)
-        // Allow items with 0 quantity to be skipped without blocking others, unless a value is entered.
-        if (qtyInput.value.trim() !== '' && (isNaN(quantityToStockOut) || quantityToStockOut <= 0)) {
-            alert(`Please enter a valid positive quantity for item ${qtyInput.dataset.productCode} (Lot: ${qtyInput.dataset.lotNumber}).`);
-            qtyInput.focus();
-            allItemsValid = false;
-            return; // Stop processing this item
+        let palletsToStockOut = 0; // Default to 0 if input is empty or invalid initially
+        if (palletQtyInput && palletQtyInput.value.trim() !== '') {
+            palletsToStockOut = parseInt(palletQtyInput.value, 10);
         }
         
-        // If quantity is 0 or input is empty, skip this item from being added to the list
-        if (quantityToStockOut === 0 || qtyInput.value.trim() === '') {
+        const currentQuantity = parseInt(qtyInput.dataset.currentQuantity, 10);
+        const currentPallets = parseInt(qtyInput.dataset.currentPallets, 10);
+
+        // Skip item if quantity input is empty (treat as no stock out for this item in multi-item popup)
+        if (qtyInput.value.trim() === '') {
+            // If pallet quantity is also empty or zero, it's fine to skip.
+            // If pallet quantity has a value but carton quantity is zero/empty, it's ambiguous.
+            // For now, primarily driven by carton quantity.
+            if (!palletQtyInput || palletQtyInput.value.trim() === '' || palletsToStockOut === 0) {
+                return; // Skip this item entirely
+            }
+            // If pallet quantity is specified but carton quantity is not, this might be an issue.
+            // For now, we require carton quantity to be > 0 if any stock out is happening.
+        }
+        
+        // Validate Carton Quantity
+        if (isNaN(quantityToStockOut) || quantityToStockOut < 0) {
+            alert(`Please enter a valid non-negative quantity for item ${qtyInput.dataset.productCode} (Lot: ${qtyInput.dataset.lotNumber}).`);
+            qtyInput.focus();
+            allItemsValid = false;
+            return; 
+        }
+        if (quantityToStockOut > currentQuantity) {
+            alert(`Carton quantity to stock out (${quantityToStockOut}) for item ${qtyInput.dataset.productCode} (Lot: ${qtyInput.dataset.lotNumber}) cannot exceed current available quantity (${currentQuantity}).`);
+            qtyInput.focus();
+            allItemsValid = false;
             return; 
         }
 
-
-        // Validate Input: Quantity to stock out cannot exceed available quantity
-        if (quantityToStockOut > currentQuantity) {
-            alert(`Quantity to stock out (${quantityToStockOut}) for item ${qtyInput.dataset.productCode} (Lot: ${qtyInput.dataset.lotNumber}) cannot exceed current available quantity (${currentQuantity}).`);
-            qtyInput.focus();
+        // Validate Pallet Quantity
+        if (isNaN(palletsToStockOut) || palletsToStockOut < 0) {
+            alert(`Please enter a valid non-negative pallet quantity for item ${qtyInput.dataset.productCode} (Lot: ${qtyInput.dataset.lotNumber}).`);
+            if (palletQtyInput) palletQtyInput.focus();
             allItemsValid = false;
-            return; // Stop processing this item
+            return;
         }
+        if (palletsToStockOut > currentPallets) {
+            alert(`Pallet quantity to stock out (${palletsToStockOut}) for item ${qtyInput.dataset.productCode} (Lot: ${qtyInput.dataset.lotNumber}) cannot exceed current available pallets (${currentPallets}).`);
+            if (palletQtyInput) palletQtyInput.focus();
+            allItemsValid = false;
+            return;
+        }
+
+        // If both are 0, skip (unless user explicitly entered 0 for an item they want to clear from list later - current logic skips)
+        if (quantityToStockOut === 0 && palletsToStockOut === 0 && qtyInput.value.trim() === '' && (!palletQtyInput || palletQtyInput.value.trim() === '')) {
+            return;
+        }
+
 
         // Create the stock-out item object with all relevant details from data attributes
         const stockOutItem = {
@@ -1474,7 +1532,7 @@ function handleAddToStockOutList() {
     }
 
     if (itemsToAdd.length === 0) {
-        alert("No items with valid quantities were entered for stock out.");
+        alert("No items with valid quantities or pallet quantities were entered for stock out.");
         return;
     }
 
@@ -1484,7 +1542,8 @@ function handleAddToStockOutList() {
 
     // Clear inputs and hide the popup
     dynamicQuantityInputs.forEach(input => input.value = '');
-    dynamicPalletIdInputs.forEach(input => input.value = '');
+    // Also clear the new pallet quantity inputs
+    dynamicPalletQuantityInputs.forEach(input => input.value = ''); 
     stockOutPopup.style.display = 'none';
 }
 
@@ -1703,216 +1762,194 @@ async function handleSubmitAllStockOut() {
     const submitButton = document.getElementById('submit-all-stock-out-btn');
     if (submitButton) {
         submitButton.disabled = true;
-        submitButton.textContent = 'Generating Print...'; // Optional text change
+        submitButton.textContent = 'Processing...';
     }
 
     try {
         if (jordonStockOutItems.length === 0) {
             alert("No items to stock out.");
-            return; // Return early, but finally block will still execute
+            return;
         }
 
-        const printableItems = jordonStockOutItems.map((item, index) => {
-      let destinationWarehouseName = 'N/A';
-      if (item.selectedDestinationWarehouseId && mainWarehouses && mainWarehouses.length > 0) {
-        const foundWarehouse = mainWarehouses.find(wh => wh.id === item.selectedDestinationWarehouseId);
-        if (foundWarehouse) {
-          destinationWarehouseName = foundWarehouse.name;
+        const withdrawDateInput = document.getElementById('withdraw-date');
+        const withdrawDate = withdrawDateInput ? withdrawDateInput.value : '';
+        const hhInput = document.getElementById('collection-time-hh');
+        const mmInput = document.getElementById('collection-time-mm');
+        const ampmInput = document.getElementById('collection-time-ampm');
+        const hh = hhInput ? hhInput.value : '';
+        const mm = mmInput ? mmInput.value : '';
+        const ampm = ampmInput ? ampmInput.value : '';
+
+        if (!withdrawDate) {
+            alert("Withdraw Date is required.");
+            return;
         }
-      }
-      return {
-        serialNumber: index + 1,
-        productName: item.productName || 'N/A',
-        productPackaging: item.productPackaging || 'N/A', // For Packing Size
-        location: item.location || 'N/A',
-        lotNumber: item.lotNumber || 'N/A',
-        palletId: item.palletId || 'N/A', // For Pallet ID (Out)
-        destinationWarehouseName: destinationWarehouseName,
-        quantityToStockOut: item.quantityToStockOut || 0,
-        batchNumber: item.batchNumber || 'N/A'
-        // Add other fields if they are part of jordonStockOutItems and needed for print
-        // e.g., productCode: item.productCode || 'N/A'
-      };
-    });
+        if (!hh || !mm) {
+            alert("Please select a valid Collection Time (HH:MM).");
+            return;
+        }
+        const collectionTime = `${hh}:${mm} ${ampm}`;
 
-    // For verification during development, log this array.
-    // This console.log should be removed after the print functionality is complete.
-    console.log('Printable Items (for potential print):', printableItems);
+        const serialNumber = await getNextSerialNumber();
+        if (!serialNumber || serialNumber.startsWith('ERROR_SN_')) {
+            alert("Could not generate serial number. Please try again. Error: " + serialNumber);
+            return;
+        }
 
-    // Get New Field Values
-    const withdrawDateInput = document.getElementById('withdraw-date');
-    const withdrawDate = withdrawDateInput ? withdrawDateInput.value : '';
-
-    const hhInput = document.getElementById('collection-time-hh');
-    const mmInput = document.getElementById('collection-time-mm');
-    const ampmInput = document.getElementById('collection-time-ampm');
-
-    const hh = hhInput ? hhInput.value : '';
-    const mm = mmInput ? mmInput.value : '';
-    const ampm = ampmInput ? ampmInput.value : '';
-
-    // Validation for withdraw date and collection time
-    if (!withdrawDate) {
-        alert("Withdraw Date is required.");
-        if (submitButton) { submitButton.disabled = false; submitButton.textContent = 'Submit All Stock Out';}
-        return;
-    }
-    if (!hh || !mm) { // AM/PM defaults to AM so it will always have a value
-        alert("Please select a valid Collection Time (HH:MM).");
-        if (submitButton) { submitButton.disabled = false; submitButton.textContent = 'Submit All Stock Out';}
-        return;
-    }
-    
-    const collectionTime = `${hh}:${mm} ${ampm}`;
-
-    // Get Serial Number
-    const serialNumber = await getNextSerialNumber();
-    if (!serialNumber || serialNumber.startsWith('ERROR_SN_')) {
-        alert("Could not generate serial number. Please try again. Error: " + serialNumber);
-        // Button is re-enabled in finally block
-        return;
-    }
-
-    // Construct Firestore Object
-    const formData = {
-        serialNumber: serialNumber,
-        withdrawDate: withdrawDate,
-        collectionTime: collectionTime,
-        status: "Pending", // Default status
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        items: jordonStockOutItems.map(item => ({
-            inventoryId: item.inventoryId,
-            productId: item.productId,
-            productCode: item.productCode,
-            productName: item.productName,
-            productPackaging: item.productPackaging,
-            location: item.location,
-            lotNumber: item.lotNumber,
-            batchNumber: item.batchNumber,
-            quantityToStockOut: item.quantityToStockOut,
-            palletId: item.palletId || 'N/A', // Ensure palletId is included from jordonStockOutItems
-            selectedDestinationWarehouseId: item.selectedDestinationWarehouseId,
-            // Resolve destinationWarehouseName at the time of saving
-            destinationWarehouseName: (mainWarehouses.find(wh => wh.id === item.selectedDestinationWarehouseId)?.name) || 'N/A'
-        })),
-        // createdByUserId: firebase.auth().currentUser ? firebase.auth().currentUser.uid : null // Example if auth is used
-    };
-
-    // Save to Firestore
-    const db = firebase.firestore();
-    await db.collection('jordonWithdrawForms').add(formData);
-    alert('Withdraw Form saved successfully! Serial Number: ' + serialNumber);
-
-    // --- Print Logic (Moved to after successful save) ---
-    // Now formData itself contains all necessary fields for its items, including palletId
-    const printableHTML = generatePrintableStockOutHTML(formData);
-    const printWindow = window.open('', '_blank', 'height=600,width=800');
-
-    if (printWindow) {
-        printWindow.document.write(printableHTML);
-        printWindow.document.close();
-        printWindow.focus();
-        printWindow.print();
-    } else {
-        alert('Could not open print window. Please check your browser pop-up blocker settings.');
-    }
-    // --- End Print Logic ---
-
-    // Clear Form and UI
-    jordonStockOutItems = [];
-    renderStockOutPreview();
-    // Reset collection time inputs
-    if (hhInput) hhInput.value = '';
-    if (mmInput) mmInput.value = '';
-    if (ampmInput) ampmInput.value = 'AM'; // Default to AM
-    setDefaultWithdrawDate(); // Reset withdraw date to default
-
-    // if (!confirm("Are you sure you want to submit these stock out items?")) {
-    //     return;
-    // }
-
-    // const submitButton = document.getElementById('submit-all-stock-out-btn');
-    // if (submitButton) {
-    //     submitButton.disabled = true;
-    //     submitButton.textContent = 'Processing...';
-    // }
-
-    // const successfulItems = [];
-    // const failedItemsInfo = []; 
-    // const itemsToProcess = [...jordonStockOutItems]; 
-    // let remainingItemsInPendingList = []; 
-
-    // for (const item of itemsToProcess) {
-    //     const data = {
-    //         productId: item.productId,
-    //         productCode: item.productCode,
-    //         productName: item.productName,
-    //         warehouseId: item.warehouseId, 
-    //         batchNo: item.batchNo, 
-    //         quantity: Number(item.quantityToStockOut),
-    //         operatorId: "JORDON_WMS_USER", // TODO: Replace with actual logged-in user ID when authentication is implemented.
-    //         inventoryId: item.inventoryId, 
-    //         lotNumber: item.lotNumber, 
-    //     };
-
-    //     try {
-    //         if (typeof transactionAPI !== 'object' || typeof transactionAPI.outboundStock !== 'function') {
-    //             if (typeof jest !== 'undefined' || (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test')) { 
-    //                 console.warn("transactionAPI.outboundStock is not available. Simulating success for testing environment.");
-    //                 await new Promise(resolve => setTimeout(resolve, 50)); 
-    //             } else {
-    //                 throw new Error('transactionAPI.outboundStock is not available. Cannot process stock out.');
-    //             }
-    //         } else {
-    //              await transactionAPI.outboundStock(data);
-    //         }
-    //         successfulItems.push(item);
-    //     } catch (error) {
-    //         const errorMessage = error.message || 'Unknown error during stock out';
-    //         console.error(`Failed to stock out item ${item.productName} (Code: ${item.productCode}, Inv ID: ${item.inventoryId}):`, errorMessage, error);
-    //         failedItemsInfo.push({ item, error: errorMessage });
-    //         remainingItemsInPendingList.push(item); 
-    //     }
-    // }
-
-    // jordonStockOutItems = remainingItemsInPendingList; 
-
-    // // Enhanced Feedback messages
-    // let alertMessage = "";
-    // if (failedItemsInfo.length === 0 && successfulItems.length > 0) {
-    //     alertMessage = `All ${successfulItems.length} items stocked out successfully!`;
-    // } else if (failedItemsInfo.length > 0 && successfulItems.length > 0) {
-    //     const failedSummary = failedItemsInfo.map(f => `${f.item.productCode}: ${f.error}`).join('; ');
-    //     alertMessage = `Partial success: ${successfulItems.length} items stocked out. \n${failedItemsInfo.length} items failed: ${failedSummary}. \nFailed items remain in the list. See console for full details.`;
-    // } else if (failedItemsInfo.length > 0 && successfulItems.length === 0 && itemsToProcess.length > 0) {
-    //     const failedSummary = failedItemsInfo.map(f => `${f.item.productCode}: ${f.error}`).join('; ');
-    //     alertMessage = `All ${failedItemsInfo.length} items failed to stock out: ${failedSummary}. \nFailed items remain in the list. See console for full details.`;
-    // } else if (successfulItems.length === 0 && failedItemsInfo.length === 0 && itemsToProcess.length > 0) {
-    //     alertMessage = "No items were processed. There might be an issue with the transaction system or all items failed validation. Check console.";
-    // }
-    // if(alertMessage) alert(alertMessage);
+        // This operatorId should ideally come from an authentication system
+        const operatorId = firebase.auth().currentUser ? firebase.auth().currentUser.uid : "JORDON_WMS_USER_FALLBACK";
 
 
-    // renderStockOutPreview(); 
+        const formDataForFirestore = {
+            serialNumber: serialNumber,
+            withdrawDate: withdrawDate,
+            collectionTime: collectionTime,
+            status: "Processing", // Initial status before inventory transactions
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            items: jordonStockOutItems.map(item => ({
+                inventoryId: item.inventoryId, 
+                productId: item.productId,
+                productCode: item.productCode,
+                productName: item.productName,
+                productPackaging: item.productPackaging,
+                location: item.location, 
+                lotNumber: item.lotNumber,
+                batchNumber: item.batchNumber,
+                quantityToStockOut: item.quantityToStockOut, // Cartons
+                palletsToStockOut: item.palletsToStockOut,  // Pallets - new field
+                // palletId: item.palletId || 'N/A', // This field is now effectively palletsToStockOut
+                selectedDestinationWarehouseId: item.selectedDestinationWarehouseId,
+                destinationWarehouseName: (mainWarehouses.find(wh => wh.id === item.selectedDestinationWarehouseId)?.name) || 'N/A',
+                transferStatus: 'Pending' 
+            })),
+            operatorId: operatorId
+        };
 
-    // const currentSubmitButton = document.getElementById('submit-all-stock-out-btn');
-    // if (currentSubmitButton) { 
-    //     currentSubmitButton.disabled = false;
-    //     currentSubmitButton.textContent = 'Submit All Stock Out';
-    // }
+        const db = firebase.firestore();
+        // Initial save of the form
+        const formDocRef = await db.collection('jordonWithdrawForms').add(formDataForFirestore);
+        console.log('Withdraw Form saved with ID: ' + formDocRef.id + '. Serial Number: ' + serialNumber + '. Now processing inventory transactions.');
+        
+        if (submitButton) {
+            submitButton.textContent = 'Updating Inventory...';
+        }
 
-    // if (successfulItems.length > 0) {
-    //     console.log("Refreshing inventory summary after successful stock out...");
-    //     // Ensure loading message for summary is handled by loadInventorySummaryData itself
-    //     loadInventorySummaryData().then(displayInventorySummary).catch(err => {
-    //         console.error("Error refreshing inventory summary post stock-out:", err);
-    //         alert("Inventory summary could not be refreshed. Please check manually or try refreshing the page.");
-    //     });
-    // }
+        let allTransactionsSuccessful = true;
+        const transactionResults = [];
+        // Keep a mutable copy of items to update statuses
+        let processedItemsArray = JSON.parse(JSON.stringify(formDataForFirestore.items)); 
+
+        for (let i = 0; i < processedItemsArray.length; i++) {
+            const item = processedItemsArray[i]; 
+            let outboundSuccess = false;
+
+            try {
+                // 1. Outbound from Jordon
+                const outboundData = {
+                    inventoryId: item.inventoryId,
+                    quantityToDecrement: item.quantityToStockOut, // Cartons
+                    palletsToDecrement: item.palletsToStockOut,  // Pallets - new field to pass
+                    productCode: item.productCode, 
+                    productName: item.productName, 
+                    productId: item.productId, 
+                    operatorId: operatorId
+                };
+                // console.log(`Attempting outbound for item ${item.productCode}, invId: ${item.inventoryId}, qty: ${item.quantityToStockOut}, pallets: ${item.palletsToStockOut}, productId: ${item.productId}`);
+                await window.transactionAPI.outboundStockByInventoryId(outboundData);
+                outboundSuccess = true;
+                // console.log(`Outbound success for ${item.productCode}`);
+
+                // 2. Inbound to Destination Warehouse
+                // Note: Inbound logic does not currently handle pallets explicitly for destination.
+                // It creates/updates inventory based on carton quantity. If destination also tracks pallets,
+                // inboundStock would need similar modification or the destination warehouse has its own pallet logic.
+                // For now, only Jordon outbound is explicitly handling pallet quantity deduction from _3plDetails.pallet.
+                const inboundData = {
+                    productId: item.productId,
+                    productCode: item.productCode,
+                    productName: item.productName,
+                    warehouseId: item.selectedDestinationWarehouseId, // Destination
+                    batchNo: item.batchNumber, // Assuming batch number carries over
+                    quantity: item.quantityToStockOut,
+                    operatorId: operatorId,
+                    // Potentially add other details like original lot number, palletId if needed for destination's records
+                };
+                // console.log(`Attempting inbound for item ${item.productCode} to warehouse ${item.selectedDestinationWarehouseId}, qty: ${item.quantityToStockOut}`);
+                await window.transactionAPI.inboundStock(inboundData);
+                inboundSuccess = true;
+                // console.log(`Inbound success for ${item.productCode} to ${item.selectedDestinationWarehouseId}`);
+                
+                processedItemsArray[i].transferStatus = 'Completed';
+                delete processedItemsArray[i].errorMessage; // Remove error message if successful
+                transactionResults.push({ item: item.productCode, status: 'Transferred Successfully' });
+
+            } catch (error) {
+                allTransactionsSuccessful = false;
+                const currentItemError = error.message || "Unknown error during inventory transaction.";
+                console.error(`Error processing item ${item.productCode} (Inv ID: ${item.inventoryId}):`, currentItemError, error);
+                
+                transactionResults.push({ item: item.productCode, status: `Failed: ${currentItemError}` });
+
+                let failureStage = 'Unknown';
+                if (outboundSuccess) failureStage = 'Inbound Failed after Outbound Succeeded';
+                else failureStage = 'Outbound Failed';
+                
+                processedItemsArray[i].transferStatus = `Failed - ${failureStage}`;
+                processedItemsArray[i].errorMessage = currentItemError;
+            }
+        }
+
+        // Update overall form status and the entire items array in one go
+        await formDocRef.update({
+            status: allTransactionsSuccessful ? "Completed" : "Partially Completed / Failed",
+            items: processedItemsArray // Save the full items array with updated statuses
+        });
+
+        let finalMessage = `Withdraw Form ${serialNumber} processed.\n`;
+        transactionResults.forEach(res => {
+            finalMessage += `\n- ${res.item}: ${res.status}`;
+        });
+        
+        if (!allTransactionsSuccessful) {
+            finalMessage += "\n\nSome inventory transactions failed. Please check the form details and system logs.";
+        }
+        alert(finalMessage);
+
+        // Generate and show print version
+        const printableHTML = generatePrintableStockOutHTML(formDataForFirestore); // Use formDataForFirestore as it has all details
+        const printWindow = window.open('', '_blank', 'height=600,width=800');
+        if (printWindow) {
+            printWindow.document.write(printableHTML);
+            printWindow.document.close();
+            printWindow.focus();
+            // printWindow.print(); // Comment out for now to avoid immediate print during dev
+        } else {
+            alert('Could not open print window. Please check your browser pop-up blocker settings.');
+        }
+
+        // Clear UI and refresh data
+        jordonStockOutItems = [];
+        renderStockOutPreview();
+        if (hhInput) hhInput.value = '';
+        if (mmInput) mmInput.value = '';
+        if (ampmInput) ampmInput.value = 'AM';
+        setDefaultWithdrawDate();
+        
+        // Refresh inventory summary view as stock levels have changed
+        console.log("Refreshing inventory summary data after stock out processing.");
+        loadInventorySummaryData().then(displayInventorySummary).catch(err => {
+            console.error("Error refreshing Jordon inventory summary post stock-out:", err);
+            // Potentially alert user that summary might be stale
+        });
+
+
+    } catch (error) {
+        console.error("Error in handleSubmitAllStockOut:", error);
+        alert("An unexpected error occurred: " + error.message);
     } finally {
         if (submitButton) {
             submitButton.disabled = false;
-            submitButton.textContent = 'Submit All Stock Out'; // Optional: revert text
+            submitButton.textContent = 'Submit All Stock Out';
         }
     }
 }
