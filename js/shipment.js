@@ -519,9 +519,16 @@ async function handleUpdateInventoryClick() { // Made async
 
                     // Add pallet information specifically for Jordon view if it's a 3PL and pallet data exists
                     if (viewName === 'Jordon' && item.pallet !== undefined) {
-                        // Removed: console.log(`[${viewName}] Item: ${currentItemCode}, Jordon view, adding pallet: '${item.pallet}' to _3plDetails.`);
-                        // item.pallet is already processed by extractJordonData (e.g., "4", "0", "")
-                        inventoryDoc._3plDetails.pallet = String(item.pallet || '').trim(); // Remains the same
+                        let numericPalletCount = 0;
+                        const palletStringValue = String(item.pallet || '').trim();
+                        if (palletStringValue !== "") {
+                            numericPalletCount = Number(palletStringValue);
+                            if (isNaN(numericPalletCount)) {
+                                console.warn(`[${viewName}] Item: ${currentItemCode}, Jordon view, could not parse pallet value '${palletStringValue}' to number. Defaulting to 0.`);
+                                numericPalletCount = 0;
+                            }
+                        }
+                        inventoryDoc._3plDetails.pallet = numericPalletCount; // Assign numeric value
                     }
                 } else {
                     // Removed: console.log(`[${viewName}] Item: ${currentItemCode}, Warehouse type is '${warehouseDetails.warehouseType}'. Skipping _3plDetails.`);
