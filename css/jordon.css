@@ -160,3 +160,127 @@
   display: table;
 }
 
+/* Inline Edit Buttons in Jordon Inventory Summary Table */
+.jordon-page-container #jordon-inventory-summary-tbody .inline-actions-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch; /* Make buttons take full width of cell, or use center/flex-start if preferred */
+  justify-content: center; /* Center buttons vertically if cell is taller */
+  gap: 5px; /* Space between buttons, replaces individual margins for this purpose */
+}
+
+.jordon-page-container #jordon-inventory-summary-tbody .inline-actions-cell .btn {
+  padding: 3px 8px;   /* Slightly more vertical padding, adjust as needed */
+  font-size: 0.85em;  /* Standardized font size */
+  /* margin-left is no longer needed due to flex column layout and gap */
+  line-height: 1.4;   /* Adjust for better text centering with padding */
+  min-width: 60px;    /* Ensure buttons have a decent minimum width */
+  text-align: center;
+  width: 100%; /* Make buttons take full width of the flex item (cell) */
+  box-sizing: border-box; /* Include padding and border in the element's total width and height */
+}
+
+/* .jordon-page-container #jordon-inventory-summary-tbody .inline-actions-cell .btn:first-child { */
+  /* margin-left: 0; This is no longer needed */
+/* } */
+
+/* If specific margin is still desired for the save button, it can be added to .inline-save-btn */
+/* For example:
+.jordon-page-container #jordon-inventory-summary-tbody .inline-actions-cell .inline-save-btn {
+  margin-bottom: 5px;
+}
+*/
+/* However, 'gap' on the parent flex container is generally preferred. */
+
+/* Style for input fields within the table during inline edit */
+.jordon-page-container #jordon-inventory-summary-tbody td input.inline-edit-input {
+  padding: 4px 6px; /* Comfortable padding */
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  box-sizing: border-box; /* Important for width calculations */
+  font-size: 0.9em; /* Match table cell font or slightly smaller */
+  /* width is set inline in JS, but can have max-width here if needed */
+}
+
+.jordon-page-container #jordon-inventory-summary-tbody td input.inline-edit-input:focus {
+  border-color: #007bff;
+  box-shadow: 0 0 0 0.1rem rgba(0,123,255,.25);
+  outline: none;
+}
+
+/* Specific colors for inline edit buttons */
+.jordon-page-container #jordon-inventory-summary-tbody .inline-actions-cell .inline-save-btn {
+  background-color: #5bc0de; /* Light Blue (Info) */
+  border-color: #5bc0de;
+  color: white;
+}
+.jordon-page-container #jordon-inventory-summary-tbody .inline-actions-cell .inline-save-btn:hover {
+  background-color: #31b0d5; 
+  border-color: #269abc;
+}
+
+.jordon-page-container #jordon-inventory-summary-tbody .inline-actions-cell .inline-cancel-btn {
+  background-color: #dc3545; /* Red (Danger) */
+  border-color: #dc3545;
+  color: white;
+}
+.jordon-page-container #jordon-inventory-summary-tbody .inline-actions-cell .inline-cancel-btn:hover {
+  background-color: #c82333;
+  border-color: #bd2130;
+}
+
+
+/* Stock Out Controls Styling (Date and Time Pickers) */
+#stock-out-controls {
+  display: flex;
+  flex-wrap: wrap; /* Allow wrapping on smaller screens if necessary */
+  align-items: center; /* Align items vertically */
+  gap: 10px; /* Space between control groups */
+  padding: 15px; 
+  margin-bottom: 20px; 
+  border: 1px solid #ddd; 
+  background-color: #f9f9f9;
+  border-radius: 5px;
+}
+
+#stock-out-controls label {
+  margin-right: 5px; /* Space after label */
+  font-weight: normal; /* Default font weight for these labels */
+  white-space: nowrap; /* Prevent labels from wrapping */
+}
+
+#stock-out-controls input[type="date"],
+#stock-out-controls select {
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.95em;
+  /* Removed margin-right from individual elements, gap handles spacing */
+}
+
+#stock-out-controls input[type="date"] {
+  min-width: 150px; /* Give date input a decent width */
+}
+
+#stock-out-controls #collection-time-hh,
+#stock-out-controls #collection-time-mm {
+  min-width: 65px; /* Specific width for HH/MM selects */
+  text-align: center;
+}
+#stock-out-controls #collection-time-ampm {
+  min-width: 70px;
+}
+
+/* Grouping for Collection Time for finer control if needed */
+.collection-time-group {
+  display: flex;
+  align-items: center;
+  gap: 5px; /* Space between HH, colon, MM, AM/PM */
+}
+
+/* Style for the colon if it's a separate label/span */
+#stock-out-controls label[for="collection-time-mm"] {
+  margin-left: 0; /* Remove extra left margin if colon is a label */
+  margin-right: 0;
+}
+
