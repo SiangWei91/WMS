@@ -133,28 +133,59 @@ window.productAPI = productAPI_firestore;
 
 // --- Placeholder/Outdated APIs ---
 window.inventoryAPI = {
-    async getInventory(params = {}) {
+    async getInventory() { // Removed params, as we're fetching all for client-side aggregation
         try {
-            let inventoryQuery = window.db.collection('inventory');
-            if (params.productCode && params.productCode.trim() !== '') {
-                inventoryQuery = inventoryQuery.where('productCode', '==', params.productCode.trim());
-            }
-            const querySnapshot = await inventoryQuery.get();
-            const inventoryItems = querySnapshot.docs.map(doc => ({ 
-                id: doc.id, 
-                ...doc.data() 
-            }));
-            return { 
-                data: inventoryItems, 
-                pagination: { 
-                    page: 1, 
-                    totalPages: 1, 
-                    totalRecords: inventoryItems.length 
-                } 
+            // 1. Fetch all warehouses
+            const warehousesSnapshot = await window.db.collection('warehouses').get();
+            const allWarehouses = warehousesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            // 2. Fetch all products and create a lookup map
+            const productsSnapshot = await window.db.collection('products').get();
+            const productMap = new Map();
+            productsSnapshot.docs.forEach(doc => {
+                const product = doc.data();
+                if (product.productCode) {
+                    productMap.set(product.productCode, product.name || 'Unknown Product');
+                }
+            });
+
+            // 3. Fetch all inventory items
+            const inventorySnapshot = await window.db.collection('inventory').get();
+            const inventoryItems = inventorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            // 4. Aggregate inventory data
+            const aggregatedData = new Map();
+
+            inventoryItems.forEach(item => {
+                const productCode = item.productCode;
+                if (!productCode) return; // Skip items without productCode
+
+                if (!aggregatedData.has(productCode)) {
+                    aggregatedData.set(productCode, {
+                        productCode: productCode,
+                        productName: productMap.get(productCode) || 'Unknown Product (Code not in products collection)',
+                        totalQuantity: 0,
+                        quantitiesByWarehouseId: {}
+                    });
+                }
+
+                const productEntry = aggregatedData.get(productCode);
+                const quantity = Number(item.quantity) || 0;
+                productEntry.totalQuantity += quantity;
+
+                if (item.warehouseId) {
+                    productEntry.quantitiesByWarehouseId[item.warehouseId] = (productEntry.quantitiesByWarehouseId[item.warehouseId] || 0) + quantity;
+                }
+            });
+
+            return {
+                aggregatedInventory: Array.from(aggregatedData.values()),
+                warehouses: allWarehouses
+                // Pagination is removed as we're doing client-side aggregation of all data
             };
         } catch (error) {
-            console.error("Error fetching inventory from Firestore:", error);
-            throw error; 
+            console.error("Error fetching and aggregating inventory data from Firestore:", error);
+            throw error;
         }
     }
 };
