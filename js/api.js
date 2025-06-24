@@ -21,7 +21,10 @@ const productAPI_firestore = {
                 // For simplicity, this example prioritizes name search.
             } else {
                 // Default ordering if no search term
-                productsQuery = productsQuery.orderBy('createdAt', 'desc'); // Or 'productCode', 'name', etc.
+                // Switched from 'createdAt' to 'productCode' to ensure products missing
+                // 'createdAt' (e.g., manually entered old products) are still fetched and displayed.
+                // 'productCode' is assumed to be a more reliable field present on all products.
+                productsQuery = productsQuery.orderBy('productCode', 'asc'); // Default sort by productCode
             }
 
             // Pagination
