@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'LXGW WenKai TC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/lxgwwenkaitc/v9/w8gDH20td8wNsI3f40DmtXZb48uK.ttf) format('truetype');
+}
+
 /* Basic styles for the stock out popup */
 #stock-out-popup {
   display: none; /* Hidden by default */
@@ -21,7 +29,7 @@
   max-width: 600px; 
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15); 
   border-radius: 8px; 
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
+  font-family: 'LXGW WenKai TC', cursive, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
 }
 
 .close-btn {
@@ -283,4 +291,3 @@
   margin-left: 0; /* Remove extra left margin if colon is a label */
   margin-right: 0;
 }
-
