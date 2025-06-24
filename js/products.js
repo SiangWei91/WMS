@@ -1,5 +1,10 @@
-let currentPage = 1;
-const rowsPerPage = 10; // This might be used for client-side pagination or if Firestore pagination is implemented
+// State variables for pagination
+let productFetchController = null; // To abort previous fetches
+let lastVisibleDocSnapshot = null; // Stores the snapshot for the last document of the current page
+let firstVisibleDocSnapshots = [null]; // Stack to keep track of first docs of pages for "previous"
+let currentProductSearchTerm = ''; // Renamed to avoid conflict with function params
+const PRODUCTS_PER_PAGE = 10; 
+let globalHasNextPage = false; // Keep track of hasNextPage globally
 
 async function loadProducts() {
     const content = document.getElementById('content');
@@ -10,7 +15,7 @@ async function loadProducts() {
                 <div class="actions">
                     <div class="search-box">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="product-search" placeholder="Search Product...">
+                        <input type="text" id="product-search" placeholder="Search Product..." value="${escapeHtml(currentProductSearchTerm)}">
                     </div>
                     <button id="add-product-btn" class="btn btn-primary">
                         <i class="fas fa-plus"></i> Add Product
@@ -29,11 +34,11 @@ async function loadProducts() {
                         </tr>
                     </thead>
                     <tbody id="products-table-body">
-                        <!-- 产品数据将在这里动态加载 -->
+                        <!-- Product data will be dynamically loaded here -->
                     </tbody>
                 </table>
                 <div class="pagination" id="pagination">
-                    <!-- 分页控件将在这里动态加载 -->
+                    <!-- Pagination controls will be dynamically loaded here -->
                 </div>
             </div>
         </div>
@@ -41,25 +46,67 @@ async function loadProducts() {
 
     document.getElementById('add-product-btn').addEventListener('click', loadAddProductForm);
     document.getElementById('product-search').addEventListener('input', handleProductSearch);
-    await fetchProducts();
+    
+    // Initial fetch
+    await fetchProducts({
+        searchTerm: currentProductSearchTerm,
+        limit: PRODUCTS_PER_PAGE,
+        startAfterDoc: null // Explicitly null for first page
+    });
 }
 
-async function fetchProducts(searchTerm = '') {
+async function fetchProducts({ searchTerm = '', limit = PRODUCTS_PER_PAGE, startAfterDoc = null, isPrev = false } = {}) {
+    const tbody = document.getElementById('products-table-body');
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center">Loading products...</td></tr>`;
+
+    // Abort any ongoing fetch
+    if (productFetchController) {
+        productFetchController.abort();
+    }
+    productFetchController = new AbortController();
+    const signal = productFetchController.signal;
+
     try {
         const params = {
-            page: currentPage, // TODO: Implement actual pagination with Firestore (limit, startAfter)
-            limit: rowsPerPage,
-            searchTerm: searchTerm // TODO: Implement search with Firestore (e.g., using where clauses if searching by specific fields)
+            limit: limit,
+            searchTerm: searchTerm,
+            lastVisibleDocSnapshot: startAfterDoc // API expects lastVisibleDocSnapshot
         };
         
-        // Now calls the Firestore productAPI from window object
-        const response = await window.productAPI.getProducts(params); 
+        const response = await window.productAPI.getProducts(params); // Signal can be added if API supports it
         
+        if (signal.aborted) {
+            console.log("Product fetch aborted");
+            return;
+        }
+
         renderProductsTable(response.data);
-        renderPagination(response.pagination); // Pagination data from API might be simplified for now
+        
+        // Update pagination state
+        lastVisibleDocSnapshot = response.lastVisibleDocSnapshot;
+        globalHasNextPage = response.hasNextPage;
+
+        if (!isPrev) { // If going next or first page
+            if (startAfterDoc) { // Means it was a "next" click
+                firstVisibleDocSnapshots.push(startAfterDoc); // The start of the current page was the previous page's last doc
+            } else { // Means it was a "first" page load (new search or initial)
+                firstVisibleDocSnapshots = [null]; // Reset for first page
+            }
+        }
+        // For "prev", the calling function will pop from firstVisibleDocSnapshots
+
+        renderPagination(); 
+
     } catch (error) {
-        console.error('获取产品列表失败 (Firestore):', error);
-        alert('获取产品列表失败: ' + error.message); // User-friendly message
+        if (error.name === 'AbortError') {
+            console.log('Fetch aborted by user.');
+        } else {
+            console.error('Failed to fetch product list (Firestore):', error);
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error loading products: ${error.message}</td></tr>`;
+            alert('Failed to fetch product list: ' + error.message);
+        }
+    } finally {
+        productFetchController = null; // Clear controller
     }
 }
 
@@ -68,9 +115,12 @@ function renderProductsTable(products) {
     tbody.innerHTML = '';
 
     if (!products || products.length === 0) {
+        const searchTerm = document.getElementById('product-search').value.trim();
         tbody.innerHTML = `
             <tr>
-                <td colspan="5" class="no-data">没有找到产品</td>
+                <td colspan="5" class="no-data text-center">
+                    No products found${searchTerm ? ` for "${escapeHtml(searchTerm)}"` : ''}.
+                </td>
             </tr>
         `;
         return;
@@ -78,29 +128,26 @@ function renderProductsTable(products) {
 
     products.forEach(product => {
         const row = document.createElement('tr');
-        // Ensure product.id is used for data-id, which comes from Firestore document ID
-        // Handle Firestore Timestamps for createdAt
         let createdAtDisplay = 'N/A';
         if (product.createdAt && product.createdAt.toDate) {
             createdAtDisplay = product.createdAt.toDate().toLocaleString();
         } else if (product.createdAt) {
-            // Fallback if it's already a string or number (less likely with serverTimestamp)
             createdAtDisplay = new Date(product.createdAt).toLocaleString();
         }
 
         row.innerHTML = `
-            <td>${product.productCode || ''}</td>
-            <td>${product.name || ''}</td>
-            <td>${product.packaging || ''}</td>
-            <td>${createdAtDisplay}</td>
+            <td>${escapeHtml(product.productCode || '')}</td>
+            <td>${escapeHtml(product.name || '')}</td>
+            <td>${escapeHtml(product.packaging || '')}</td>
+            <td>${escapeHtml(createdAtDisplay)}</td>
             <td class="actions">
-                <button class="btn-icon view-btn" data-id="${product.id}">
+                <button class="btn-icon view-btn" data-id="${escapeHtml(product.id)}">
                     <i class="fas fa-eye"></i>
                 </button>
-                <button class="btn-icon edit-btn" data-id="${product.id}">
+                <button class="btn-icon edit-btn" data-id="${escapeHtml(product.id)}">
                     <i class="fas fa-edit"></i>
                 </button>
-                <button class="btn-icon delete-btn" data-id="${product.id}">
+                <button class="btn-icon delete-btn" data-id="${escapeHtml(product.id)}">
                     <i class="fas fa-trash"></i>
                 </button>
             </td>
@@ -108,74 +155,74 @@ function renderProductsTable(products) {
         tbody.appendChild(row);
     });
 
-    // Re-attach event listeners after rendering table
     document.querySelectorAll('.view-btn').forEach(btn => {
         btn.addEventListener('click', (e) => viewProduct(e.target.closest('button').dataset.id));
     });
-    
     document.querySelectorAll('.edit-btn').forEach(btn => {
         btn.addEventListener('click', (e) => editProduct(e.target.closest('button').dataset.id));
     });
-    
     document.querySelectorAll('.delete-btn').forEach(btn => {
         btn.addEventListener('click', (e) => deleteProduct(e.target.closest('button').dataset.id));
     });
 }
 
-function renderPagination(pagination) {
+function renderPagination() {
     const paginationDiv = document.getElementById('pagination');
     paginationDiv.innerHTML = '';
 
-    // Note: Firestore pagination is different. This is a simplified version.
-    // Actual Firestore pagination would involve query cursors (startAfter, endBefore).
-    // For now, assuming pagination object provides page and totalPages.
-    const { page = 1, totalPages = 1 } = pagination || {};
-
     const prevBtn = document.createElement('button');
     prevBtn.className = 'btn-pagination';
-    prevBtn.disabled = page === 1;
-    prevBtn.innerHTML = '<i class="fas fa-chevron-left"></i>';
+    // Disable "Previous" if we are on the first page (firstVisibleDocSnapshots has only one element: null)
+    prevBtn.disabled = firstVisibleDocSnapshots.length <= 1;
+    prevBtn.innerHTML = '<i class="fas fa-chevron-left"></i> Previous';
     prevBtn.addEventListener('click', () => {
-        if (page > 1) {
-            currentPage = page - 1;
-            fetchProducts(document.getElementById('product-search').value.trim());
+        if (firstVisibleDocSnapshots.length > 1) {
+            lastVisibleDocSnapshot = null; // Clear lastVisible, as we are going back
+            const previousPageStartSnapshot = firstVisibleDocSnapshots.pop(); // Remove current page's start
+                                                                          // Now the top is previous page's start
+            fetchProducts({ 
+                searchTerm: currentProductSearchTerm, 
+                limit: PRODUCTS_PER_PAGE, 
+                startAfterDoc: firstVisibleDocSnapshots[firstVisibleDocSnapshots.length -1], // The one now at the top
+                isPrev: true 
+            });
         }
     });
     paginationDiv.appendChild(prevBtn);
 
-    for (let i = 1; i <= totalPages; i++) {
-        const pageBtn = document.createElement('button');
-        pageBtn.className = `btn-pagination ${i === page ? 'active' : ''}`;
-        pageBtn.textContent = i;
-        pageBtn.addEventListener('click', () => {
-            currentPage = i;
-            fetchProducts(document.getElementById('product-search').value.trim());
-        });
-        paginationDiv.appendChild(pageBtn);
-    }
-
     const nextBtn = document.createElement('button');
     nextBtn.className = 'btn-pagination';
-    nextBtn.disabled = page === totalPages;
-    nextBtn.innerHTML = '<i class="fas fa-chevron-right"></i>';
+    nextBtn.disabled = !globalHasNextPage;
+    nextBtn.innerHTML = 'Next <i class="fas fa-chevron-right"></i>';
     nextBtn.addEventListener('click', () => {
-        if (page < totalPages) {
-            currentPage = page + 1;
-            fetchProducts(document.getElementById('product-search').value.trim());
+        if (globalHasNextPage && lastVisibleDocSnapshot) {
+            fetchProducts({ 
+                searchTerm: currentProductSearchTerm, 
+                limit: PRODUCTS_PER_PAGE, 
+                startAfterDoc: lastVisibleDocSnapshot,
+                isPrev: false 
+            });
         }
     });
     paginationDiv.appendChild(nextBtn);
 }
 
 function handleProductSearch(e) {
-    const searchTerm = e.target.value.trim();
-    currentPage = 1; // Reset to first page on new search
-    fetchProducts(searchTerm);
+    currentProductSearchTerm = e.target.value.trim();
+    // Reset pagination state for new search
+    lastVisibleDocSnapshot = null;
+    firstVisibleDocSnapshots = [null]; 
+    globalHasNextPage = false;
+
+    fetchProducts({ 
+        searchTerm: currentProductSearchTerm, 
+        limit: PRODUCTS_PER_PAGE, 
+        startAfterDoc: null // Fetch first page of search results
+    });
 }
 
 function loadAddProductForm() {
     const content = document.getElementById('content');
-    // This form structure is fine.
     content.innerHTML = `
         <div class="form-container">
             <h1>Add Product</h1>
@@ -201,7 +248,14 @@ function loadAddProductForm() {
         </div>
     `;
 
-    document.getElementById('cancel-btn').addEventListener('click', loadProducts);
+    document.getElementById('cancel-btn').addEventListener('click', () => {
+        // Reset search term and reload products (first page)
+        currentProductSearchTerm = ''; 
+        lastVisibleDocSnapshot = null;
+        firstVisibleDocSnapshots = [null];
+        globalHasNextPage = false;
+        loadProducts();
+    });
     document.getElementById('product-form').addEventListener('submit', handleAddProduct);
 }
 
@@ -213,14 +267,17 @@ async function handleAddProduct(e) {
         productCode: formData.get('productCode'),
         name: formData.get('name'),
         packaging: formData.get('packaging')
-        // createdAt will be handled by Firestore serverTimestamp in productAPI.addProduct
     };
     
     try {
-        // Now calls the Firestore productAPI from window object
         await window.productAPI.addProduct(productData);
         alert('产品添加成功!');
-        loadProducts(); // Reload products list
+        // Reset search and pagination, then reload to see the new product (likely on first page)
+        currentProductSearchTerm = ''; 
+        lastVisibleDocSnapshot = null;
+        firstVisibleDocSnapshots = [null];
+        globalHasNextPage = false;
+        loadProducts(); 
     } catch (error) {
         console.error('添加产品失败 (Firestore):', error);
         alert('添加产品失败: ' + error.message);
@@ -229,7 +286,7 @@ async function handleAddProduct(e) {
 
 async function viewProduct(productId) {
     try {
-        console.log('查看产品 (Firestore):', productId);
+        console.log('Viewing product (Firestore):', productId);
         const product = await window.productAPI.getProductById(productId);
         if (product) {
             let createdAtString = 'N/A';
@@ -238,51 +295,69 @@ async function viewProduct(productId) {
             } else if (product.createdAt) {
                 createdAtString = new Date(product.createdAt).toLocaleString();
             }
-            // Simple alert for now. A modal or dedicated view area would be better.
-            alert(`产品详情:\nID: ${product.id}\n代码: ${product.productCode}\n名称: ${product.name}\n包装: ${product.packaging}\n创建时间: ${createdAtString}`);
+            alert(`Product Details:\nID: ${escapeHtml(product.id)}\nCode: ${escapeHtml(product.productCode)}\nName: ${escapeHtml(product.name)}\nPackaging: ${escapeHtml(product.packaging)}\nCreated At: ${escapeHtml(createdAtString)}`);
         } else {
-            alert('未找到产品');
+            alert('Product not found.');
         }
     } catch (error) {
-        console.error('查看产品失败 (Firestore):', error);
-        alert('查看产品失败: ' + error.message);
+        console.error('Failed to view product (Firestore):', error);
+        alert('Failed to view product: ' + error.message);
     }
 }
 
 async function editProduct(productId) {
-    // This is a simplified version for the subtask.
-    // A full implementation would load a form pre-filled with product data.
     try {
-        console.log('编辑产品 (Firestore):', productId);
+        console.log('Editing product (Firestore):', productId);
         const product = await window.productAPI.getProductById(productId);
         if (product) {
             console.log('Product data for editing:', product);
-            // For now, just an alert. TODO: Implement a form for editing.
-            alert(`编辑产品 (详细信息见控制台, ID: ${product.id}). 完整编辑功能需表单.`);
-            // Example of what might follow:
-            // loadEditProductForm(product); 
-            // function loadEditProductForm(product) {
-            //   // ... similar to loadAddProductForm, but pre-fill fields
-            //   // ... and the submit handler would call window.productAPI.updateProduct()
-            // }
+            // TODO: Implement a form for editing, pre-filled with product data.
+            // For now, an alert. This part is beyond pagination scope.
+            alert(`Editing product (ID: ${escapeHtml(product.id)}). Full edit functionality requires a form. See console for data.`);
         } else {
-            alert('未找到要编辑的产品');
+            alert('Product not found for editing.');
         }
     } catch (error) {
-        console.error('编辑产品失败 (获取数据) (Firestore):', error);
-        alert('编辑产品失败 (获取数据): ' + error.message);
+        console.error('Failed to fetch product for editing (Firestore):', error);
+        alert('Failed to fetch product for editing: ' + error.message);
     }
 }
 
 async function deleteProduct(productId) {
-    if (confirm(`确定要删除这个产品 (ID: ${productId}) 吗？`)) {
+    if (confirm(`Are you sure you want to delete this product (ID: ${escapeHtml(productId)})?`)) {
         try {
             await window.productAPI.deleteProduct(productId);
-            alert('产品删除成功!');
-            loadProducts(); // Refresh the products list
+            alert('Product deleted successfully!');
+            // After deletion, reload current page of products
+            // Fetch with current search term and the start of the current page.
+            // The current firstVisibleDocSnapshots.pop() then [firstVisibleDocSnapshots.length-1] gives the start of current page.
+            let currentViewStart = null;
+            if (firstVisibleDocSnapshots.length > 0) {
+                 currentViewStart = firstVisibleDocSnapshots[firstVisibleDocSnapshots.length -1];
+            }
+            // If a deletion makes the current page empty and it was the last page, 
+            // we might want to go to the new last page.
+            // For simplicity, just refetch what would be the current page.
+            // If it's empty, user can navigate.
+             fetchProducts({ 
+                searchTerm: currentProductSearchTerm, 
+                limit: PRODUCTS_PER_PAGE, 
+                startAfterDoc: currentViewStart
+            });
         } catch (error) {
-            console.error('删除产品失败 (Firestore):', error);
-            alert('删除产品失败: ' + error.message);
+            console.error('Failed to delete product (Firestore):', error);
+            alert('Failed to delete product: ' + error.message);
         }
     }
+}
+
+// Helper to escape HTML to prevent XSS - good practice for displaying user/DB data
+function escapeHtml(unsafe) {
+    if (unsafe === null || unsafe === undefined) return '';
+    return String(unsafe)
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
 }
