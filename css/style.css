@@ -1,9 +1,17 @@
+@font-face {
+  font-family: 'LXGW WenKai TC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/lxgwwenkaitc/v9/w8gDH20td8wNsI3f40DmtXZb48uK.ttf) format('truetype');
+}
+
 /* 基础样式重置 */
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: 'LXGW WenKai TC', cursive, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 body {
