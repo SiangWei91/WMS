@@ -1,23 +1,60 @@
 // generateNameTokens function removed
 
 const productAPI_firestore = {
-    async getProducts(params = {}) { 
+    async getProducts(params = {}) {
+        const PRODUCTS_PER_PAGE = params.limit || 10;
         try {
             let productsQuery = window.db.collection('products');
-            // Example: Add orderBy if needed, e.g., productsQuery = productsQuery.orderBy('createdAt', 'desc');
-            // TODO: Implement actual pagination using params.limit and Firestore cursors (startAfter)
-            // TODO: Implement actual search/filtering based on params.searchTerm
 
-            const querySnapshot = await productsQuery.get();
+            // Search / Filtering
+            if (params.searchTerm && params.searchTerm.trim() !== '') {
+                const searchTerm = params.searchTerm.trim();
+                // Basic search by productCode or name (prefix match for name)
+                // More complex search might require multiple queries or a dedicated search service
+                // This example assumes searching by name prefix, adjust if productCode search is primary
+                productsQuery = productsQuery.orderBy('name')
+                                           .startAt(searchTerm)
+                                           .endAt(searchTerm + '\uf8ff');
+                // If you also want to search by productCode, it might need a separate query or logic,
+                // as ordering by 'name' and then trying to filter by 'productCode' effectively
+                // in the same query is complex.
+                // For simplicity, this example prioritizes name search.
+            } else {
+                // Default ordering if no search term
+                productsQuery = productsQuery.orderBy('createdAt', 'desc'); // Or 'productCode', 'name', etc.
+            }
+
+            // Pagination
+            if (params.lastVisibleDocSnapshot) {
+                productsQuery = productsQuery.startAfter(params.lastVisibleDocSnapshot);
+            }
+            
+            productsQuery = productsQuery.limit(PRODUCTS_PER_PAGE);
+
+            const querySnapshot = await productsQuery.get(); // Corrected typo
+            
             const products = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
+            const lastVisibleDocSnapshot = querySnapshot.docs.length > 0 ? querySnapshot.docs[querySnapshot.docs.length - 1] : null;
+            
+            // To determine if there's a next page, we can try to fetch one more item
+            // This is a common pattern but adds one extra read per page load if not the last page.
+            // Alternatively, rely on products.length === PRODUCTS_PER_PAGE (less accurate if last page has exactly PRODUCTS_PER_PAGE items)
+            let hasNextPage = false;
+            if (lastVisibleDocSnapshot) {
+                const nextPageQuery = productsQuery.startAfter(lastVisibleDocSnapshot).limit(1); // Re-construct query for check
+                const nextPageSnapshot = await nextPageQuery.get();
+                if (!nextPageSnapshot.empty) {
+                    hasNextPage = true;
+                }
+            }
+
+
             return { 
-                data: products, 
-                pagination: { 
-                    page: params.page || 1,  
-                    totalPages: 1,          
-                    totalRecords: products.length 
-                } 
+                data: products,
+                lastVisibleDocSnapshot: lastVisibleDocSnapshot,
+                hasNextPage: hasNextPage 
+                // Old pagination structure removed
             };
         } catch (error) {
             console.error("Error fetching products from Firestore:", error);
@@ -131,29 +168,62 @@ const productAPI_firestore = {
 
 window.productAPI = productAPI_firestore; 
 
-// --- Placeholder/Outdated APIs ---
+// --- Cache Configuration ---
+const CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+
+let warehouseCache = {
+    data: null,
+    timestamp: 0
+};
+
+let productMapCache = { // Caches the productMap used in getInventory
+    data: null,
+    timestamp: 0
+};
+
+// --- Inventory API with Caching ---
 window.inventoryAPI = {
     async getInventory() { // Removed params, as we're fetching all for client-side aggregation
         try {
-            // 1. Fetch all warehouses
-            const warehousesSnapshot = await window.db.collection('warehouses').get();
-            const allWarehouses = warehousesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const now = Date.now();
+            let allWarehouses;
+            let productMap;
 
-            // 2. Fetch all products and create a lookup map
-            const productsSnapshot = await window.db.collection('products').get();
-            const productMap = new Map();
-            productsSnapshot.docs.forEach(doc => {
-                const product = doc.data();
-                if (product.productCode) {
-                    // Storing more product info for later use in inventory rendering
-                    productMap.set(product.productCode, { 
-                        name: product.name || 'Unknown Product',
-                        packaging: product.packaging || '' 
-                    });
-                }
-            });
+            // 1. Fetch warehouses (with caching)
+            if (warehouseCache.data && (now - warehouseCache.timestamp < CACHE_DURATION_MS)) {
+                allWarehouses = warehouseCache.data;
+                console.log("Using cached warehouses");
+            } else {
+                console.log("Fetching warehouses from Firestore");
+                const warehousesSnapshot = await window.db.collection('warehouses').get();
+                allWarehouses = warehousesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                warehouseCache.data = allWarehouses;
+                warehouseCache.timestamp = now;
+            }
 
-            // 3. Fetch all inventory items
+            // 2. Fetch products and create a lookup map (with caching for productMap)
+            if (productMapCache.data && (now - productMapCache.timestamp < CACHE_DURATION_MS)) {
+                productMap = productMapCache.data;
+                console.log("Using cached product map");
+            } else {
+                console.log("Fetching products from Firestore for product map");
+                const productsSnapshot = await window.db.collection('products').get();
+                productMap = new Map();
+                productsSnapshot.docs.forEach(doc => {
+                    const product = doc.data();
+                    if (product.productCode) {
+                        productMap.set(product.productCode, {
+                            name: product.name || 'Unknown Product',
+                            packaging: product.packaging || ''
+                        });
+                    }
+                });
+                productMapCache.data = productMap;
+                productMapCache.timestamp = now;
+            }
+
+            // 3. Fetch all inventory items (no caching for this part in this step)
+            console.log("Fetching inventory items from Firestore");
             const inventorySnapshot = await window.db.collection('inventory').get();
             const inventoryItems = inventorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
@@ -527,36 +597,63 @@ window.transactionAPI = {
 
 window.dashboardAPI = {
     async getStats() {
+        let totalProducts = 0;
+        let totalInventory = 0;
+        let todayTransactions = 0;
+
         try {
-            const productsSnapshot = await window.db.collection('products').get();
-            const totalProducts = productsSnapshot.size;
-            const inventorySnapshot = await window.db.collection('inventory').get();
-            let totalInventory = 0;
-            inventorySnapshot.forEach(doc => {
-                totalInventory += (doc.data().quantity || 0); 
-            });
+            // Attempt to read pre-aggregated product count
+            const productStatsRef = window.db.doc('system_stats/productStats');
+            const productStatsDoc = await productStatsRef.get();
+            if (productStatsDoc.exists) {
+                totalProducts = productStatsDoc.data().count || 0;
+            } else {
+                console.warn("Product stats document (system_stats/productStats) not found. Displaying 0. Consider implementing server-side aggregation.");
+            }
+        } catch (error) {
+            console.error("Error fetching product stats:", error);
+            // totalProducts remains 0
+        }
+
+        try {
+            // Attempt to read pre-aggregated inventory quantity
+            const inventoryStatsRef = window.db.doc('system_stats/inventoryStats');
+            const inventoryStatsDoc = await inventoryStatsRef.get();
+            if (inventoryStatsDoc.exists) {
+                totalInventory = inventoryStatsDoc.data().totalQuantity || 0;
+            } else {
+                console.warn("Inventory stats document (system_stats/inventoryStats) not found. Displaying 0. Consider implementing server-side aggregation.");
+            }
+        } catch (error) {
+            console.error("Error fetching inventory stats:", error);
+            // totalInventory remains 0
+        }
+
+        try {
+            // Fetch today's transactions (this query is generally efficient)
             const todayStart = new Date();
-            todayStart.setHours(0, 0, 0, 0); 
+            todayStart.setHours(0, 0, 0, 0);
             const todayEnd = new Date();
-            todayEnd.setHours(23, 59, 59, 999); 
+            todayEnd.setHours(23, 59, 59, 999);
             const transactionsQuery = window.db.collection('transactions')
                 .where('transactionDate', '>=', todayStart)
                 .where('transactionDate', '<=', todayEnd);
             const todayTransactionsSnapshot = await transactionsQuery.get();
-            const todayTransactions = todayTransactionsSnapshot.size;
-            return {
-                totalProducts: totalProducts,
-                totalInventory: totalInventory,
-                todayTransactions: todayTransactions
-            };
+            todayTransactions = todayTransactionsSnapshot.size;
         } catch (error) {
-            console.error("Error fetching dashboard stats from Firestore:", error);
-            return { totalProducts: 0, totalInventory: 0, todayTransactions: 0 }; 
+            console.error("Error fetching today's transactions:", error);
+            // todayTransactions remains 0
         }
+        
+        return {
+            totalProducts: totalProducts,
+            totalInventory: totalInventory,
+            todayTransactions: todayTransactions
+        };
     }
 };
 
-console.log("productAPI, inventoryAPI, transactionAPI (inbound/outbound/getTransactions), and dashboardAPI now use Firestore.");
+console.log("productAPI, inventoryAPI, transactionAPI (inbound/outbound/getTransactions), and dashboardAPI now use Firestore. Dashboard API expects pre-aggregated stats for products and inventory.");
 
 window.jordonAPI = {
     async addJordonStockItems(itemsArray) {
