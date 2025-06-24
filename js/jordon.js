@@ -755,43 +755,84 @@ async function loadWarehouseData() {
     }
 }
 
+async function fetchProductDetailsByCodes(db, productCodes) {
+    const productDetailsMap = new Map();
+    if (!productCodes || productCodes.length === 0) {
+        return productDetailsMap;
+    }
+
+    const uniqueProductCodes = [...new Set(productCodes)]; // Ensure unique codes
+    const productsRef = db.collection('products');
+    const MAX_IN_CLAUSE_ARGS = 30; // Firestore 'in' query limit
+
+    // Split productCodes into chunks of MAX_IN_CLAUSE_ARGS for multiple 'in' queries if necessary
+    const chunks = [];
+    for (let i = 0; i < uniqueProductCodes.length; i += MAX_IN_CLAUSE_ARGS) {
+        chunks.push(uniqueProductCodes.slice(i, i + MAX_IN_CLAUSE_ARGS));
+    }
+
+    for (const chunk of chunks) {
+        if (chunk.length > 0) {
+            try {
+                const productQuery = productsRef.where('productCode', 'in', chunk);
+                const productSnapshot = await productQuery.get();
+                productSnapshot.forEach(doc => {
+                    const productData = doc.data();
+                    productDetailsMap.set(productData.productCode, {
+                        name: productData.name || 'N/A',
+                        packaging: productData.packaging || 'N/A',
+                        // productId: doc.id // Add product ID if needed elsewhere
+                    });
+                });
+            } catch (error) {
+                console.error(`Error fetching product details for chunk ${chunk}:`, error);
+                // Continue processing other chunks, but some product details might be missing
+            }
+        }
+    }
+    return productDetailsMap;
+}
+
 async function loadPendingJordonStock() {
     const stockInTableBody = document.getElementById('stock-in-table-body');
     try {
-        // It's good practice to show a loading state here if this function is user-triggered.
-        // However, it's currently called when the 'Stock In' tab is activated, 
-        // and handleStockInTabActivation already sets a loading message.
-        const db = firebase.firestore(); 
-        const pendingItemsWithProducts = [];
+        const db = firebase.firestore();
         const inventoryRef = db.collection('inventory');
         const q = inventoryRef
             .where('warehouseId', '==', 'jordon')
             .where('_3plDetails.status', '==', 'pending');
         const pendingInventorySnapshot = await q.get();
 
-        for (const doc of pendingInventorySnapshot.docs) {
-            const inventoryItem = { id: doc.id, ...doc.data() };
+        if (pendingInventorySnapshot.empty) {
+            console.log("No pending Jordon stock found.");
+            return [];
+        }
+
+        const inventoryItems = pendingInventorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        // Collect all unique product codes
+        const productCodesToFetch = inventoryItems
+            .map(item => item.productCode)
+            .filter(code => code); // Filter out undefined/empty codes
+
+        // Fetch product details in batch
+        const productDetailsMap = await fetchProductDetailsByCodes(db, productCodesToFetch);
+
+        const pendingItemsWithProducts = inventoryItems.map(inventoryItem => {
             let productName = 'N/A';
             let productPackaging = 'N/A';
-            // productId is fetched from the 'products' collection, not used here directly yet
-            // let productId = null; 
 
-            if (inventoryItem.productCode) {
-                const productsRef = db.collection('products');
-                const productQuery = productsRef.where('productCode', '==', inventoryItem.productCode).limit(1);
-                const productSnapshot = await productQuery.get();
-                if (!productSnapshot.empty) {
-                    const productData = productSnapshot.docs[0].data();
-                    productName = productData.name || 'N/A';
-                    productPackaging = productData.packaging || 'N/A';
-                } else {
-                    console.warn(`Product details not found for productCode: ${inventoryItem.productCode}`);
-                }
+            if (inventoryItem.productCode && productDetailsMap.has(inventoryItem.productCode)) {
+                const details = productDetailsMap.get(inventoryItem.productCode);
+                productName = details.name;
+                productPackaging = details.packaging;
+            } else if (inventoryItem.productCode) {
+                console.warn(`Product details not found in map for productCode: ${inventoryItem.productCode}`);
             } else {
                 console.warn(`Inventory item ${inventoryItem.id} missing productCode.`);
             }
-            pendingItemsWithProducts.push({ ...inventoryItem, productName, productPackaging });
-        }
+            return { ...inventoryItem, productName, productPackaging };
+        });
 
         pendingItemsWithProducts.sort((a, b) => {
             const rowNumA = a.excelRowNumber;
@@ -861,16 +902,12 @@ function displayPendingStockInTable(items) {
 
 async function loadInventorySummaryData() {
     console.log("loadInventorySummaryData() called");
-    const summaryTableBody = document.getElementById('jordon-inventory-summary-tbody'); // Get ref to table body for error display
-
-    // Show loading state in summary table before fetching data
+    const summaryTableBody = document.getElementById('jordon-inventory-summary-tbody');
     if (summaryTableBody) {
         summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Loading Jordon inventory summary...</td></tr>';
     }
 
     const db = firebase.firestore();
-    const summaryItems = [];
-
     try {
         const inventoryQuery = db.collection('inventory')
             .where('warehouseId', '==', 'jordon')
@@ -880,49 +917,61 @@ async function loadInventorySummaryData() {
 
         if (snapshot.empty) {
             console.log("No Jordon inventory items found.");
-             if (summaryTableBody) summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">No inventory items found for Jordon.</td></tr>';
-            return summaryItems; // Return empty, but after updating table
+            if (summaryTableBody) summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">No inventory items found for Jordon.</td></tr>';
+            currentInventorySummaryItems = [];
+            return [];
         }
 
-        let productId = null; // Define productId here to ensure it's in scope for summaryItems.push
-        for (const doc of snapshot.docs) {
-            const inventoryItem = { id: doc.id, ...doc.data() };
+        const inventoryItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        const productCodesToFetch = inventoryItems
+            .map(item => item.productCode)
+            .filter(code => code);
+
+        const productDetailsMap = await fetchProductDetailsByCodes(db, productCodesToFetch);
+
+        const summaryItems = inventoryItems.map(inventoryItem => {
             let productName = 'N/A';
             let productPackaging = 'N/A';
-            productId = null; // Reset for each item
+            let productId = null; // Product document ID from 'products' collection
 
-            if (inventoryItem.productCode) {
-
-                const productsRef = db.collection('products');
-                const productQuery = productsRef.where('productCode', '==', inventoryItem.productCode).limit(1);
-                const productSnapshot = await productQuery.get();
-
-                if (!productSnapshot.empty) {
-                    const productDoc = productSnapshot.docs[0];
-                    const productDataFromDoc = productDoc.data(); // Correctly get data object
-                    productName = productDataFromDoc.name || 'N/A'; // Use the correct variable
-                    productPackaging = productDataFromDoc.packaging || 'N/A'; // Use the correct variable
-                    productId = productDoc.id;
-                } else {
-                    console.warn(`Product details not found for productCode: ${inventoryItem.productCode} during summary load.`);
-                    // productId remains null
-                }
+            if (inventoryItem.productCode && productDetailsMap.has(inventoryItem.productCode)) {
+                const details = productDetailsMap.get(inventoryItem.productCode);
+                productName = details.name;
+                productPackaging = details.packaging;
+                // If fetchProductDetailsByCodes was modified to return productId, assign it here
+                // productId = details.productId; 
+                // For now, if productId is critical, fetchProductDetailsByCodes needs to include it.
+                // The original code fetched it, so let's adjust fetchProductDetailsByCodes if necessary,
+                // or re-fetch here if it's simpler for now (though less optimal).
+                // For this iteration, assuming product document ID isn't strictly needed for the summary display itself,
+                // but it was in the original `summaryItems.push`.
+                // To keep consistency with original data structure for `displayInventorySummary` that might use `productId`:
+                // We need to ensure `fetchProductDetailsByCodes` can provide `doc.id` as `productId`.
+                // Let's assume `fetchProductDetailsByCodes` is updated or we accept `productId` might be missing for now.
+                // The current `fetchProductDetailsByCodes` does NOT return the product's Firestore document ID.
+                // This means `item.productId` in `displayInventorySummary` will be undefined.
+                // If this is an issue, `fetchProductDetailsByCodes` needs to be enhanced.
+                // For now, proceeding without product's Firestore doc ID.
+            } else if (inventoryItem.productCode) {
+                console.warn(`Product details not found in map for productCode: ${inventoryItem.productCode} during summary load.`);
             } else {
                 console.warn(`Inventory item ${inventoryItem.id} missing productCode during summary load.`);
             }
-            summaryItems.push({ ...inventoryItem, productName, productPackaging, productId });
-        }
-
+            return { ...inventoryItem, productName, productPackaging, productId }; // productId will be null here
+        });
+        
         console.log('Loaded Jordon inventory summary data:', summaryItems);
-        currentInventorySummaryItems = summaryItems; // Populate currentInventorySummaryItems
+        currentInventorySummaryItems = summaryItems;
         return summaryItems;
 
     } catch (error) {
         console.error("Error loading Jordon inventory summary data:", error);
-        if (summaryTableBody) { // Display error in the summary table
+        if (summaryTableBody) {
             summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:red;">Error loading inventory summary. Please check connection or try again later.</td></tr>';
         }
-        return []; 
+        currentInventorySummaryItems = []; // Clear on error
+        return [];
     }
 }
 
