@@ -12,6 +12,7 @@
   padding: 0;
   box-sizing: border-box;
   font-family: 'LXGW WenKai TC', cursive, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-weight: bold;
 }
 
 body {
@@ -206,7 +207,7 @@ td {
 
 th {
   background-color: #f8f9fa;
-  font-weight: 600;
+  font-weight: bold;
   color: #2c3e50;
 }
 
@@ -231,7 +232,7 @@ tr:hover {
 .form-group label {
   display: block;
   margin-bottom: 8px;
-  font-weight: 500;
+  font-weight: bold;
   color: #2c3e50;
 }
 
@@ -409,7 +410,7 @@ tr:hover {
   padding: 4px 8px;
   border-radius: 12px;
   font-size: 0.8rem;
-  font-weight: 500;
+  font-weight: bold;
 }
 
 .badge-success {
@@ -480,7 +481,7 @@ tr:hover {
 }
 
 .filter-group label {
-  font-weight: 500;
+  font-weight: bold;
   color: #2c3e50;
   white-space: nowrap;
 }
@@ -615,7 +616,7 @@ tr:hover {
 
 .company-name {
   font-size: 1.4rem;
-  font-weight: 600;
+  font-weight: bold;
   color: #2c3e50;
   display: flex;
   align-items: center;
@@ -710,7 +711,7 @@ The previous style for individual td[data-product-code] is removed as the click 
   border-bottom: 1px solid #ccc; /* Separator line */
   font-size: 1.1rem; /* Slightly smaller than main modal title */
   color: #333;
-  font-weight: 600;
+  font-weight: bold;
 }
 
 /* Ensure the first warehouse heading doesn't have excessive top margin */
