@@ -118,7 +118,6 @@
   background-color: #f8f9fa; 
   color: #495057; 
   font-size: 0.95em;
-  font-weight: 500;
   transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out, border-color 0.2s ease-in-out;
   white-space: nowrap; 
   margin-right: 2px; 
@@ -181,7 +180,6 @@
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.9em; 
-  font-weight: 500;
   transition: background-color 0.2s ease-in-out;
   margin-left: 15px; 
   height: fit-content; 
