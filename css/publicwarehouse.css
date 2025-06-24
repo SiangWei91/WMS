@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'LXGW WenKai TC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/lxgwwenkaitc/v9/w8gDH20td8wNsI3f40DmtXZb48uK.ttf) format('truetype');
+}
+
 /* === Public Warehouse Submenu === */
 .sidebar nav ul li ul {
   list-style-type: none;
