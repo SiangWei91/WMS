@@ -89,6 +89,11 @@ document.addEventListener('DOMContentLoaded', function () {
       } else {
           // User is signed out.
           console.log('onAuthStateChanged (app.js): User signed out. Redirecting to login.');
+          if (typeof invalidateProductCache === 'function') {
+              invalidateProductCache();
+          } else {
+              console.warn('invalidateProductCache function not found. Product cache may not be cleared on auth state change to signed out.');
+          }
           sessionStorage.removeItem('isAuthenticated'); 
           sessionStorage.removeItem('loggedInUser');
           window.location.href = 'login.html';
@@ -102,6 +107,11 @@ document.addEventListener('DOMContentLoaded', function () {
           event.preventDefault();
           console.log('Logout button clicked. Signing out...');
           firebase.auth().signOut().then(() => {
+              if (typeof invalidateProductCache === 'function') {
+                  invalidateProductCache();
+              } else {
+                  console.warn('invalidateProductCache function not found. Product cache may not be cleared on logout.');
+              }
               console.log('Firebase sign-out successful. onAuthStateChanged will handle redirect.');
           }).catch(error => {
               console.error('Firebase sign-out error:', error);
