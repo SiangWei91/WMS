@@ -256,8 +256,7 @@ const productAPI_firestore = {
 window.productAPI = productAPI_firestore;
 
 // --- Cache Configuration ---
-// This CACHE_DURATION_MS is for warehouse and productMap, not for the new product cache.
-// It can be kept or removed if not used elsewhere after product cache is primary.
+// This CACHE_DURATION_MS is for warehouseCache, productMapCache is removed.
 const CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes 
 
 let warehouseCache = {
@@ -265,20 +264,16 @@ let warehouseCache = {
     timestamp: 0
 };
 
-let productMapCache = { // Caches the productMap used in getInventory
-    data: null,
-    timestamp: 0
-};
+// productMapCache has been removed, inventoryAPI will use the main product session cache.
 
 window.inventoryAPI = {
     async getInventory() {
         try {
             const now = Date.now();
             let allWarehouses;
-            let productMap;
+            let productMap = new Map(); // Initialize productMap
 
-            // 缓存仓库
-            // Uses its own CACHE_DURATION_MS, not PRODUCT_CACHE_DURATION_MS
+            // Warehouse Caching (remains unchanged)
             if (warehouseCache.data && (now - warehouseCache.timestamp < CACHE_DURATION_MS)) {
                 allWarehouses = warehouseCache.data;
             } else {
@@ -288,17 +283,25 @@ window.inventoryAPI = {
                 warehouseCache.timestamp = now;
             }
 
-            // 缓存产品映射
-            // Uses its own CACHE_DURATION_MS
-            if (productMapCache.data && (now - productMapCache.timestamp < CACHE_DURATION_MS)) {
-                productMap = productMapCache.data;
-            } else {
-                // This also fetches all products. If product cache is populated, this could potentially use it.
-                // However, for now, keeping it separate to avoid circular dependencies or complex logic.
-                const productsSnapshot = await window.db.collection('products').get();
-                productMap = new Map();
-                productsSnapshot.docs.forEach(doc => {
-                    const product = doc.data();
+            // Product Details from Main Session Cache
+            let allProductsFromCache = null;
+            if (isProductCacheValid()) {
+                allProductsFromCache = getProductCache();
+                console.log("InventoryAPI: Using valid product session cache.");
+            }
+            
+            if (!allProductsFromCache || allProductsFromCache.length === 0) {
+                console.log("InventoryAPI: Product session cache invalid or empty. Triggering population.");
+                if (window.productAPI && typeof window.productAPI.getProducts === 'function') {
+                    await window.productAPI.getProducts({ page: 1, limit: 1 }); // Trigger cache load
+                    allProductsFromCache = getProductCache(); // Attempt to get newly populated cache
+                } else {
+                    console.error("InventoryAPI: window.productAPI.getProducts function not found. Cannot populate product cache.");
+                }
+            }
+
+            if (allProductsFromCache && allProductsFromCache.length > 0) {
+                allProductsFromCache.forEach(product => {
                     if (product.productCode) {
                         productMap.set(product.productCode, {
                             name: product.name || 'Unknown Product',
@@ -306,24 +309,55 @@ window.inventoryAPI = {
                         });
                     }
                 });
-                productMapCache.data = productMap;
-                productMapCache.timestamp = now;
+                console.log(`InventoryAPI: ProductMap built with ${productMap.size} products from session cache.`);
+            } else {
+                console.warn("InventoryAPI: Product cache is empty even after attempting load. Product details in inventory will be N/A.");
+                // productMap will remain empty, leading to 'Unknown Product' for items.
             }
 
-            // 从聚合表 inventory_aggregated 读取
-            const aggSnapshot = await window.db.collection('inventory_aggregated').get();
-            const aggregatedInventory = aggSnapshot.docs.map(doc => {
-                const data = doc.data();
-                const productDetails = productMap.get(data.productCode) || { name: 'Unknown Product', packaging: '' };
+            // Fetch ALL transactions to calculate inventory client-side
+            console.log("InventoryAPI: Fetching all transactions for client-side aggregation.");
+            const transactionsSnapshot = await window.db.collection('transactions').get();
+            const inventoryData = {}; // Using an object for easier aggregation by productCode
 
-                return {
-                    productCode: data.productCode,
-                    productName: productDetails.name,
-                    packaging: productDetails.packaging,
-                    totalQuantity: data.totalQuantity || 0,
-                    quantitiesByWarehouseId: data.quantitiesByWarehouseId || {}
-                };
+            transactionsSnapshot.docs.forEach(doc => {
+                const tx = { id: doc.id, ...doc.data() };
+
+                if (!tx.productCode || tx.quantity === undefined || !tx.type || !tx.warehouseId) {
+                    console.warn(`InventoryAPI: Skipping transaction ${tx.id} due to missing fields.`);
+                    return;
+                }
+
+                if (!inventoryData[tx.productCode]) {
+                    const productDetails = productMap.get(tx.productCode) || { name: 'Unknown Product', packaging: '' };
+                    inventoryData[tx.productCode] = {
+                        productCode: tx.productCode,
+                        productName: productDetails.name,
+                        packaging: productDetails.packaging,
+                        totalQuantity: 0,
+                        quantitiesByWarehouseId: {}
+                    };
+                }
+
+                const item = inventoryData[tx.productCode];
+                const quantity = Number(tx.quantity);
+                let changeInQuantity = 0;
+
+                if (tx.type === 'inbound' || tx.type === 'initial') {
+                    changeInQuantity = quantity;
+                } else if (tx.type === 'outbound') {
+                    changeInQuantity = -quantity;
+                } else {
+                    console.warn(`InventoryAPI: Unknown transaction type ${tx.type} for tx ${tx.id}`);
+                    return; 
+                }
+                
+                item.totalQuantity += changeInQuantity;
+                item.quantitiesByWarehouseId[tx.warehouseId] = (item.quantitiesByWarehouseId[tx.warehouseId] || 0) + changeInQuantity;
             });
+            
+            const aggregatedInventory = Object.values(inventoryData);
+            console.log(`InventoryAPI: Client-side aggregation complete. ${aggregatedInventory.length} items processed.`);
 
             return {
                 aggregatedInventory,
