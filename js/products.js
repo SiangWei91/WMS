@@ -272,6 +272,8 @@ async function handleAddProduct(e) {
         productCode: formData.get('productCode'),
         name: formData.get('name'),
         packaging: formData.get('packaging')
+        // Note: AddProduct form doesn't have Chinese Name yet. 
+        // If it should, this function and loadAddProductForm need updating.
     };
     
     try {
@@ -300,7 +302,9 @@ async function viewProduct(productId) {
             } else if (product.createdAt) {
                 createdAtString = new Date(product.createdAt).toLocaleString();
             }
-            alert(`Product Details:\nID: ${escapeHtml(product.id)}\nCode: ${escapeHtml(product.productCode)}\nName: ${escapeHtml(product.name)}\nPackaging: ${escapeHtml(product.packaging)}\nCreated At: ${escapeHtml(createdAtString)}`);
+            // Include Chinese Name in view alert
+            const chineseNameDisplay = product['Chinese Name'] ? `\nChinese Name: ${escapeHtml(product['Chinese Name'])}` : '';
+            alert(`Product Details:\nID: ${escapeHtml(product.id)}\nCode: ${escapeHtml(product.productCode)}\nName: ${escapeHtml(product.name)}${chineseNameDisplay}\nPackaging: ${escapeHtml(product.packaging)}\nCreated At: ${escapeHtml(createdAtString)}`);
         } else {
             alert('Product not found.');
         }
@@ -316,11 +320,44 @@ async function editProduct(productId) {
         const product = await window.productAPI.getProductById(productId);
         if (product) {
             console.log('Product data for editing:', product);
-            // TODO: Implement a form for editing, pre-filled with product data.
-            // For now, an alert. This part is beyond pagination scope.
-            alert(`Editing product (ID: ${escapeHtml(product.id)}). Full edit functionality requires a form. See console for data.`);
+            const content = document.getElementById('content');
+            content.innerHTML = `
+                <div class="form-container">
+                    <h1>Edit Product</h1>
+                    <form id="edit-product-form" data-product-id="${escapeHtml(product.id)}">
+                        <div class="form-group">
+                            <label for="edit-productCode">Item Code*</label>
+                            <input type="text" id="edit-productCode" name="productCode" value="${escapeHtml(product.productCode || '')}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-name">Product Description*</label>
+                            <input type="text" id="edit-name" name="name" value="${escapeHtml(product.name || '')}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-chineseName">Chinese Name</label>
+                            <input type="text" id="edit-chineseName" name="chineseName" value="${escapeHtml(product['Chinese Name'] || '')}">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-packaging">Packing Size*</label>
+                            <input type="text" id="edit-packaging" name="packaging" value="${escapeHtml(product.packaging || '')}" required 
+                                   placeholder="Example: 250g x 40p">
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-secondary" id="cancel-edit-product-btn">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Save Changes</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+
+            document.getElementById('cancel-edit-product-btn').addEventListener('click', () => {
+                loadProducts(); // Reload main product list
+            });
+            document.getElementById('edit-product-form').addEventListener('submit', handleUpdateProduct);
+
         } else {
             alert('Product not found for editing.');
+            loadProducts(); // Optionally redirect to product list if product not found
         }
     } catch (error) {
         console.error('Failed to fetch product for editing (Firestore):', error);
@@ -334,16 +371,10 @@ async function deleteProduct(productId) {
             await window.productAPI.deleteProduct(productId);
             alert('Product deleted successfully!');
             // After deletion, reload current page of products
-            // Fetch with current search term and the start of the current page.
-            // The current firstVisibleDocSnapshots.pop() then [firstVisibleDocSnapshots.length-1] gives the start of current page.
             let currentViewStart = null;
             if (firstVisibleDocSnapshots.length > 0) {
                  currentViewStart = firstVisibleDocSnapshots[firstVisibleDocSnapshots.length -1];
             }
-            // If a deletion makes the current page empty and it was the last page, 
-            // we might want to go to the new last page.
-            // For simplicity, just refetch what would be the current page.
-            // If it's empty, user can navigate.
              fetchProducts({ 
                 searchTerm: currentProductSearchTerm, 
                 limit: PRODUCTS_PER_PAGE, 
@@ -352,6 +383,45 @@ async function deleteProduct(productId) {
         } catch (error) {
             console.error('Failed to delete product (Firestore):', error);
             alert('Failed to delete product: ' + error.message);
+        }
+    }
+}
+
+async function handleUpdateProduct(e) {
+    e.preventDefault();
+    const form = e.target;
+    const productId = form.dataset.productId;
+    const formData = new FormData(form);
+
+    const updatedProductData = {
+        productCode: formData.get('productCode'),
+        name: formData.get('name'),
+        'Chinese Name': formData.get('chineseName'), // Field name for Firestore
+        packaging: formData.get('packaging')
+    };
+
+    // Basic validation
+    if (!updatedProductData.productCode || !updatedProductData.name || !updatedProductData.packaging) {
+        alert('Product Code, Product Description, and Packing Size are required.');
+        return;
+    }
+
+    const saveButton = form.querySelector('button[type="submit"]');
+    try {
+        if (saveButton) {
+            saveButton.disabled = true;
+            saveButton.textContent = 'Saving...';
+        }
+
+        await window.productAPI.updateProduct(productId, updatedProductData);
+        alert('Product updated successfully!');
+        loadProducts(); // Reload the product list to see changes
+    } catch (error) {
+        console.error('Failed to update product (Firestore):', error);
+        alert('Failed to update product: ' + error.message);
+        if (saveButton) {
+            saveButton.disabled = false;
+            saveButton.textContent = 'Save Changes';
         }
     }
 }
