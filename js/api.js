@@ -242,32 +242,27 @@ let productMapCache = { // Caches the productMap used in getInventory
     timestamp: 0
 };
 
-// --- Inventory API with Caching ---
 window.inventoryAPI = {
-    async getInventory() { // Removed params, as we're fetching all for client-side aggregation
+    async getInventory() {
         try {
             const now = Date.now();
             let allWarehouses;
             let productMap;
 
-            // 1. Fetch warehouses (with caching)
+            // 缓存仓库
             if (warehouseCache.data && (now - warehouseCache.timestamp < CACHE_DURATION_MS)) {
                 allWarehouses = warehouseCache.data;
-                // console.log("Using cached warehouses");
             } else {
-                // console.log("Fetching warehouses from Firestore");
                 const warehousesSnapshot = await window.db.collection('warehouses').get();
                 allWarehouses = warehousesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 warehouseCache.data = allWarehouses;
                 warehouseCache.timestamp = now;
             }
 
-            // 2. Fetch products and create a lookup map (with caching for productMap)
+            // 缓存产品映射
             if (productMapCache.data && (now - productMapCache.timestamp < CACHE_DURATION_MS)) {
                 productMap = productMapCache.data;
-                // console.log("Using cached product map");
             } else {
-                // console.log("Fetching products from Firestore for product map");
                 const productsSnapshot = await window.db.collection('products').get();
                 productMap = new Map();
                 productsSnapshot.docs.forEach(doc => {
@@ -283,65 +278,32 @@ window.inventoryAPI = {
                 productMapCache.timestamp = now;
             }
 
-            // 3. Fetch all inventory items (no caching for this part in this step)
-            // console.log("Fetching inventory items from Firestore");
-            const inventorySnapshot = await window.db.collection('inventory').get();
-            const inventoryItems = inventorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            // 从聚合表 inventory_aggregated 读取
+            const aggSnapshot = await window.db.collection('inventory_aggregated').get();
+            const aggregatedInventory = aggSnapshot.docs.map(doc => {
+                const data = doc.data();
+                const productDetails = productMap.get(data.productCode) || { name: 'Unknown Product', packaging: '' };
 
-            // 4. Aggregate inventory data
-            const aggregatedData = new Map();
-
-            inventoryItems.forEach(item => {
-                const originalProductCode = item.productCode; // Store original code from inventory item
-                if (!originalProductCode) return; // Skip items without productCode
-
-                let productDetails = productMap.get(originalProductCode);
-
-                if (!productDetails) {
-                    // Fallback logic if not found
-                    if (originalProductCode.endsWith('.1')) {
-                        const trimmedCode = originalProductCode.slice(0, -2);
-                        productDetails = productMap.get(trimmedCode);
-                    } else {
-                        const suffixedCode = originalProductCode + '.1';
-                        productDetails = productMap.get(suffixedCode);
-                    }
-                }
-                
-                // Ensure productDetails is an object, even after fallback
-                productDetails = productDetails || { name: 'Unknown Product (Code not in products collection)', packaging: '' };
-
-                // Use originalProductCode from inventory item for aggregation key
-                if (!aggregatedData.has(originalProductCode)) {
-                    aggregatedData.set(originalProductCode, {
-                        productCode: originalProductCode, // Display the code as it is in the inventory
-                        productName: productDetails.name,
-                        packaging: productDetails.packaging,
-                        totalQuantity: 0,
-                        quantitiesByWarehouseId: {}
-                    });
-                }
-
-                const productEntry = aggregatedData.get(originalProductCode);
-                const quantity = Number(item.quantity) || 0;
-                productEntry.totalQuantity += quantity;
-
-                if (item.warehouseId) {
-                    productEntry.quantitiesByWarehouseId[item.warehouseId] = (productEntry.quantitiesByWarehouseId[item.warehouseId] || 0) + quantity;
-                }
+                return {
+                    productCode: data.productCode,
+                    productName: productDetails.name,
+                    packaging: productDetails.packaging,
+                    totalQuantity: data.totalQuantity || 0,
+                    quantitiesByWarehouseId: data.quantitiesByWarehouseId || {}
+                };
             });
 
             return {
-                aggregatedInventory: Array.from(aggregatedData.values()),
+                aggregatedInventory,
                 warehouses: allWarehouses
-                // Pagination is removed as we're doing client-side aggregation of all data
             };
         } catch (error) {
-            console.error("Error fetching and aggregating inventory data from Firestore:", error);
+            console.error("Error fetching inventory aggregation:", error);
             throw error;
         }
     }
 };
+
 
 window.transactionAPI = {
     async getTransactions(params = {}) {
