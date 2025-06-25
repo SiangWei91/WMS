@@ -804,7 +804,7 @@ async function fetchProductDetailsByCodes(db, productCodes) {
             cachedProductsMap.set(p.productCode, {
                 name: p.name || 'N/A',
                 packaging: p.packaging || 'N/A',
-                // productId: p.id // Keep product ID if needed
+                productId: p.id // Keep product ID if needed
             });
         }
     });
@@ -1028,7 +1028,7 @@ async function loadInventorySummaryData() {
             if (details) {
                 productName = details.name;
                 productPackaging = details.packaging;
-                // productId = details.productId; // Assuming fetchProductDetailsByCodes could provide this
+                productId = details.productId; // Assuming fetchProductDetailsByCodes could provide this
             } else if (inventoryItem.productCode) {
                 console.warn(`Product details not found for ${inventoryItem.productCode} (after all fallbacks) in Jordon summary`);
             } else {
@@ -1637,7 +1637,7 @@ function handleAddToStockOutList() {
             warehouseId: qtyInput.dataset.warehouseId,
             originalQuantityInInventory: currentQuantity,
             quantityToStockOut,
-            palletId,
+            palletsToStockOut: palletsToStockOut, // Corrected: was 'palletId,'
             palletType: qtyInput.dataset.palletType,
             container: qtyInput.dataset.container,
             dateStored: qtyInput.dataset.dateStored,
@@ -1844,7 +1844,7 @@ function renderStockOutPreview() {
                 <td>${escapeHtml(item.productPackaging)}</td>
                 <td>${escapeHtml(item.location)}</td>
                 <td>${escapeHtml(item.lotNumber)}</td>
-                <td>${escapeHtml(item.palletId)}</td>
+                <td>${escapeHtml(String(item.palletsToStockOut))}</td> <!-- Corrected: was item.palletId -->
                 <td><select class="form-control form-control-sm warehouse-select" data-item-inventory-id="${escapeHtml(item.inventoryId)}">${warehouseOptionsHtml}</select></td>
                 <td>${escapeHtml(String(item.quantityToStockOut))}</td> 
                 <td>${escapeHtml(item.batchNumber)}</td>
