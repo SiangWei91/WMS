@@ -4,61 +4,119 @@ const productAPI_firestore = {
     async getProducts(params = {}) {
         const PRODUCTS_PER_PAGE = params.limit || 10;
         try {
-            let productsQuery = window.db.collection('products');
+            const activeSearchTerm = params.searchTerm ? params.searchTerm.trim() : '';
 
-            // Search / Filtering
-            if (params.searchTerm && params.searchTerm.trim() !== '') {
-                const searchTerm = params.searchTerm.trim();
-                // Basic search by productCode or name (prefix match for name)
-                // More complex search might require multiple queries or a dedicated search service
-                // This example assumes searching by name prefix, adjust if productCode search is primary
-                productsQuery = productsQuery.orderBy('name')
-                                           .startAt(searchTerm)
-                                           .endAt(searchTerm + '\uf8ff');
-                // If you also want to search by productCode, it might need a separate query or logic,
-                // as ordering by 'name' and then trying to filter by 'productCode' effectively
-                // in the same query is complex.
-                // For simplicity, this example prioritizes name search.
-            } else {
-                // Default ordering if no search term
-                // Switched from 'createdAt' to 'productCode' to ensure products missing
-                // 'createdAt' (e.g., manually entered old products) are still fetched and displayed.
-                // 'productCode' is assumed to be a more reliable field present on all products.
-                productsQuery = productsQuery.orderBy('productCode', 'asc'); // Default sort by productCode
-            }
-
-            // Pagination
-            if (params.lastVisibleDocSnapshot) {
-                productsQuery = productsQuery.startAfter(params.lastVisibleDocSnapshot);
-            }
-            
-            productsQuery = productsQuery.limit(PRODUCTS_PER_PAGE);
-
-            const querySnapshot = await productsQuery.get(); // Corrected typo
-            
-            const products = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            
-            const lastVisibleDocSnapshot = querySnapshot.docs.length > 0 ? querySnapshot.docs[querySnapshot.docs.length - 1] : null;
-            
-            // To determine if there's a next page, we can try to fetch one more item
-            // This is a common pattern but adds one extra read per page load if not the last page.
-            // Alternatively, rely on products.length === PRODUCTS_PER_PAGE (less accurate if last page has exactly PRODUCTS_PER_PAGE items)
-            let hasNextPage = false;
-            if (lastVisibleDocSnapshot) {
-                const nextPageQuery = productsQuery.startAfter(lastVisibleDocSnapshot).limit(1); // Re-construct query for check
-                const nextPageSnapshot = await nextPageQuery.get();
-                if (!nextPageSnapshot.empty) {
-                    hasNextPage = true;
+            if (activeSearchTerm !== '') {
+                // --- Search Mode ---
+                let searchOffset = 0;
+                // Check if the provided snapshot is our search pagination marker & for the same search term
+                if (params.lastVisibleDocSnapshot && 
+                    params.lastVisibleDocSnapshot._isSearchPagingMarker &&
+                    params.lastVisibleDocSnapshot.searchTerm === activeSearchTerm) {
+                    searchOffset = params.lastVisibleDocSnapshot.nextOffset || 0;
                 }
+
+                // Limit for fetching from Firestore during each of the name/code queries.
+                const SEARCH_FIRESTORE_FETCH_LIMIT = 150; 
+                let combinedProducts = [];
+                const productIds = new Set(); // For de-duplication
+
+                // Queries for name and productCode
+                const nameQuery = window.db.collection('products')
+                                    .orderBy('name')
+                                    .startAt(activeSearchTerm)
+                                    .endAt(activeSearchTerm + '\uf8ff')
+                                    .limit(SEARCH_FIRESTORE_FETCH_LIMIT);
+                
+                const codeQuery = window.db.collection('products')
+                                    .orderBy('productCode')
+                                    .startAt(activeSearchTerm)
+                                    .endAt(activeSearchTerm + '\uf8ff')
+                                    .limit(SEARCH_FIRESTORE_FETCH_LIMIT);
+
+                const [nameSnapshots, codeSnapshots] = await Promise.all([
+                    nameQuery.get(),
+                    codeQuery.get()
+                ]);
+
+                nameSnapshots.docs.forEach(doc => {
+                    if (!productIds.has(doc.id)) {
+                        combinedProducts.push({ id: doc.id, ...doc.data() });
+                        productIds.add(doc.id);
+                    }
+                });
+
+                codeSnapshots.docs.forEach(doc => {
+                    if (!productIds.has(doc.id)) {
+                        combinedProducts.push({ id: doc.id, ...doc.data() });
+                        productIds.add(doc.id);
+                    }
+                });
+
+                // Sort the combined results (e.g., by productCode, then name for stability)
+                combinedProducts.sort((a, b) => {
+                    if (a.productCode < b.productCode) return -1;
+                    if (a.productCode > b.productCode) return 1;
+                    // If product codes are the same, sort by name
+                    if (a.name < b.name) return -1;
+                    if (a.name > b.name) return 1;
+                    return 0;
+                });
+                
+                // Client-side pagination from the merged and sorted list
+                const paginatedProducts = combinedProducts.slice(searchOffset, searchOffset + PRODUCTS_PER_PAGE);
+                
+                let hasNextPage = (searchOffset + PRODUCTS_PER_PAGE < combinedProducts.length);
+                let nextSearchMarker = null;
+
+                if (hasNextPage) {
+                    nextSearchMarker = {
+                        _isSearchPagingMarker: true, 
+                        searchTerm: activeSearchTerm, 
+                        nextOffset: searchOffset + PRODUCTS_PER_PAGE, 
+                    };
+                }
+                
+                return {
+                    data: paginatedProducts,
+                    lastVisibleDocSnapshot: nextSearchMarker, 
+                    hasNextPage: hasNextPage
+                };
+
+            } else {
+                // --- Non-Search Mode (Standard Browsing/Pagination) ---
+                let productsQuery = window.db.collection('products').orderBy('productCode', 'asc');
+
+                // Use Firestore cursor if lastVisibleDocSnapshot is a valid Firestore snapshot (not our search marker)
+                if (params.lastVisibleDocSnapshot && !params.lastVisibleDocSnapshot._isSearchPagingMarker) {
+                    productsQuery = productsQuery.startAfter(params.lastVisibleDocSnapshot);
+                }
+                
+                productsQuery = productsQuery.limit(PRODUCTS_PER_PAGE);
+
+                const querySnapshot = await productsQuery.get();
+                const products = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                const actualLastFirestoreDoc = querySnapshot.docs.length > 0 ? querySnapshot.docs[querySnapshot.docs.length - 1] : null;
+                
+                let hasNextPage = false;
+                if (actualLastFirestoreDoc) {
+                    const nextPageQuery = window.db.collection('products')
+                                           .orderBy('productCode', 'asc')
+                                           .startAfter(actualLastFirestoreDoc)
+                                           .limit(1);
+                    const nextPageSnapshot = await nextPageQuery.get();
+                    if (!nextPageSnapshot.empty) {
+                        hasNextPage = true;
+                    }
+                }
+
+                return { 
+                    data: products,
+                    lastVisibleDocSnapshot: actualLastFirestoreDoc, 
+                    hasNextPage: hasNextPage 
+                };
             }
-
-
-            return { 
-                data: products,
-                lastVisibleDocSnapshot: lastVisibleDocSnapshot,
-                hasNextPage: hasNextPage 
-                // Old pagination structure removed
-            };
         } catch (error) {
             console.error("Error fetching products from Firestore:", error);
             throw error;
