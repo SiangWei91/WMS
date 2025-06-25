@@ -18,6 +18,7 @@
 body {
   background-color: #f5f7fa;
   color: #333;
+  font-size: 0.9rem; /* Reduced default font size */
 }
 
 .app-container {
@@ -37,14 +38,14 @@ body {
   padding: 20px;
   display: flex;
   align-items: center;
-  font-size: 1.2rem;
+  font-size: 1.2rem; /* This will be affected by body's 0.9rem, effectively 1.2 * 0.9 = 1.08rem */
   font-weight: bold;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .logo i {
   margin-right: 10px;
-  font-size: 1.5rem;
+  font-size: 1.5rem; /* This will be affected by body's 0.9rem, effectively 1.5 * 0.9 = 1.35rem */
 }
 
 nav ul {
@@ -136,7 +137,7 @@ nav ul li i {
   align-items: center;
   justify-content: center;
   color: white;
-  font-size: 1.5rem;
+  font-size: 1.5rem; /* This will be affected by body's 0.9rem */
 }
 
 /* 内容区样式 */
@@ -168,19 +169,19 @@ nav ul li i {
 }
 
 .stat-card i {
-  font-size: 2rem;
+  font-size: 2rem; /* This will be affected by body's 0.9rem */
   margin-right: 20px;
   color: #3498db;
 }
 
 .stat-card h3 {
-  font-size: 1rem;
+  font-size: 1rem; /* This will be affected by body's 0.9rem */
   color: #7f8c8d;
   margin-bottom: 5px;
 }
 
 .stat-card p {
-  font-size: 1.5rem;
+  font-size: 1.5rem; /* This will be affected by body's 0.9rem */
   font-weight: bold;
   color: #2c3e50;
 }
@@ -200,7 +201,7 @@ table {
 
 th,
 td {
-  padding: 15px;
+  padding: 13px; /* Reduced padding */
   text-align: left;
   border-bottom: 1px solid #eee;
 }
@@ -243,7 +244,7 @@ tr:hover {
   padding: 10px 15px;
   border: 1px solid #ddd;
   border-radius: 5px;
-  font-size: 1rem;
+  font-size: 1rem; /* This will be affected by body's 0.9rem, or could be set to an absolute value if needed */
   outline: none;
   transition: border 0.3s;
 }
@@ -264,7 +265,7 @@ tr:hover {
   padding: 10px 20px;
   border: none;
   border-radius: 5px;
-  font-size: 1rem;
+  font-size: 1rem; /* This will be affected by body's 0.9rem, or could be set to an absolute value */
   cursor: pointer;
   transition: all 0.3s;
 }
@@ -409,7 +410,7 @@ tr:hover {
 .badge {
   padding: 4px 8px;
   border-radius: 12px;
-  font-size: 0.8rem;
+  font-size: 0.8rem; /* This will be affected by body's 0.9rem */
   font-weight: bold;
 }
 
@@ -571,7 +572,7 @@ tr:hover {
 }
 
 .sidebar-toggle {
-  font-size: 1.5rem;
+  font-size: 1.5rem; /* This will be affected by body's 0.9rem */
   cursor: pointer;
   margin-right: 20px;
 }
@@ -607,7 +608,7 @@ tr:hover {
   padding: 10px 15px;
   text-decoration: none;
   color: #333; /* Standard text color */
-  font-size: 0.9rem;
+  font-size: 0.9rem; /* This will be affected by body's 0.9rem, effectively 0.9 * 0.9 = 0.81rem */
 }
 
 .avatar-dropdown a:hover {
@@ -615,7 +616,7 @@ tr:hover {
 }
 
 .company-name {
-  font-size: 1.4rem;
+  font-size: 1.4rem !important; /* Ensure this overrides body font-size reduction */
   font-weight: bold;
   color: #2c3e50;
   display: flex;
@@ -679,7 +680,7 @@ tr:hover {
     position: absolute;
     top: 15px;
     right: 20px;
-    font-size: 30px;
+    font-size: 30px; /* This will be affected by body's 0.9rem */
     font-weight: bold;
 }
 
@@ -695,21 +696,13 @@ tr:hover {
     cursor: pointer; /* Indicates the row is clickable */
 }
 
-/* The existing tr:hover style will provide hover feedback:
-tr:hover {
-  background-color: #f8f9fa;
-}
-We don't need to duplicate it here unless we want a more specific hover for these rows.
-The previous style for individual td[data-product-code] is removed as the click is now on the row.
-*/
-
 /* Styling for Warehouse sub-headings in transaction modal */
 .warehouse-transaction-heading {
   margin-top: 20px; /* Space above the heading */
   margin-bottom: 10px; /* Space below the heading, before the table */
   padding-bottom: 5px; /* Space between text and border */
   border-bottom: 1px solid #ccc; /* Separator line */
-  font-size: 1.1rem; /* Slightly smaller than main modal title */
+  font-size: 1.1rem; /* This will be affected by body's 0.9rem */
   color: #333;
   font-weight: bold;
 }
