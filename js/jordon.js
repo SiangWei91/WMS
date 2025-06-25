@@ -761,35 +761,66 @@ async function fetchProductDetailsByCodes(db, productCodes) {
         return productDetailsMap;
     }
 
-    const uniqueProductCodes = [...new Set(productCodes)]; // Ensure unique codes
-    const productsRef = db.collection('products');
-    const MAX_IN_CLAUSE_ARGS = 30; // Firestore 'in' query limit
+    let allProductsFromCache = null;
 
-    // Split productCodes into chunks of MAX_IN_CLAUSE_ARGS for multiple 'in' queries if necessary
-    const chunks = [];
-    for (let i = 0; i < uniqueProductCodes.length; i += MAX_IN_CLAUSE_ARGS) {
-        chunks.push(uniqueProductCodes.slice(i, i + MAX_IN_CLAUSE_ARGS));
+    // Check if cache is valid and try to get data
+    if (typeof isProductCacheValid === 'function' && isProductCacheValid() && typeof getProductCache === 'function') {
+        allProductsFromCache = getProductCache();
     }
 
-    for (const chunk of chunks) {
-        if (chunk.length > 0) {
-            try {
-                const productQuery = productsRef.where('productCode', 'in', chunk);
-                const productSnapshot = await productQuery.get();
-                productSnapshot.forEach(doc => {
-                    const productData = doc.data();
-                    productDetailsMap.set(productData.productCode, {
-                        name: productData.name || 'N/A',
-                        packaging: productData.packaging || 'N/A',
-                        // productId: doc.id // Add product ID if needed elsewhere
-                    });
-                });
-            } catch (error) {
-                console.error(`Error fetching product details for chunk ${chunk}:`, error);
-                // Continue processing other chunks, but some product details might be missing
+    // If cache is not valid or empty, trigger a fetch which will populate the cache
+    if (!allProductsFromCache || allProductsFromCache.length === 0) {
+        console.log("Jordon: Product cache not valid or empty. Triggering cache population.");
+        try {
+            // Calling getProducts will ensure fetchAllProductsFromFirestore is called if cache is empty/invalid,
+            // and then the cache is set. We don't need the direct result here, just the side effect of caching.
+            if (window.productAPI && typeof window.productAPI.getProducts === 'function') {
+                await window.productAPI.getProducts({ page: 1, limit: 1 }); // Minimal call to trigger cache load
+                if (typeof getProductCache === 'function') {
+                    allProductsFromCache = getProductCache(); // Get the freshly populated cache
+                } else {
+                    console.error("Jordon: getProductCache function not found after attempting cache population.");
+                    return productDetailsMap; // Return empty map as we can't proceed
+                }
+            } else {
+                console.error("Jordon: window.productAPI.getProducts function not found. Cannot populate cache.");
+                return productDetailsMap; // Return empty map
             }
+        } catch (error) {
+            console.error("Jordon: Error trying to populate product cache:", error);
+            return productDetailsMap; // Return empty map on error
         }
     }
+    
+    if (!allProductsFromCache || allProductsFromCache.length === 0) {
+        console.warn("Jordon: Product cache is still empty after attempting to load. Cannot provide product details.");
+        return productDetailsMap;
+    }
+
+    // Create a temporary map from the cached products for quick lookup by productCode
+    const cachedProductsMap = new Map();
+    allProductsFromCache.forEach(p => {
+        if (p.productCode) {
+            cachedProductsMap.set(p.productCode, {
+                name: p.name || 'N/A',
+                packaging: p.packaging || 'N/A',
+                // productId: p.id // Keep product ID if needed
+            });
+        }
+    });
+
+    // Now, use the productCodes argument to populate the productDetailsMap from cachedProductsMap
+    const uniqueProductCodes = [...new Set(productCodes)]; 
+    uniqueProductCodes.forEach(code => {
+        if (cachedProductsMap.has(code)) {
+            productDetailsMap.set(code, cachedProductsMap.get(code));
+        }
+        // Note: The symmetrical fallback logic for ".1" codes is handled in the calling functions 
+        // (loadPendingJordonStock, loadInventorySummaryData) by them querying for both variations
+        // if needed, and then this function (fetchProductDetailsByCodes) will be called with all those variations.
+        // So, this function just needs to return details for the codes it's explicitly asked for.
+    });
+
     return productDetailsMap;
 }
 
