@@ -292,22 +292,37 @@ window.inventoryAPI = {
             const aggregatedData = new Map();
 
             inventoryItems.forEach(item => {
-                const productCode = item.productCode;
-                if (!productCode) return; // Skip items without productCode
+                const originalProductCode = item.productCode; // Store original code from inventory item
+                if (!originalProductCode) return; // Skip items without productCode
 
-                const productDetails = productMap.get(productCode) || { name: 'Unknown Product (Code not in products collection)', packaging: '' };
+                let productDetails = productMap.get(originalProductCode);
 
-                if (!aggregatedData.has(productCode)) {
-                    aggregatedData.set(productCode, {
-                        productCode: productCode,
+                if (!productDetails) {
+                    // Fallback logic if not found
+                    if (originalProductCode.endsWith('.1')) {
+                        const trimmedCode = originalProductCode.slice(0, -2);
+                        productDetails = productMap.get(trimmedCode);
+                    } else {
+                        const suffixedCode = originalProductCode + '.1';
+                        productDetails = productMap.get(suffixedCode);
+                    }
+                }
+                
+                // Ensure productDetails is an object, even after fallback
+                productDetails = productDetails || { name: 'Unknown Product (Code not in products collection)', packaging: '' };
+
+                // Use originalProductCode from inventory item for aggregation key
+                if (!aggregatedData.has(originalProductCode)) {
+                    aggregatedData.set(originalProductCode, {
+                        productCode: originalProductCode, // Display the code as it is in the inventory
                         productName: productDetails.name,
-                        packaging: productDetails.packaging, // Add packaging here
+                        packaging: productDetails.packaging,
                         totalQuantity: 0,
                         quantitiesByWarehouseId: {}
                     });
                 }
 
-                const productEntry = aggregatedData.get(productCode);
+                const productEntry = aggregatedData.get(originalProductCode);
                 const quantity = Number(item.quantity) || 0;
                 productEntry.totalQuantity += quantity;
 
