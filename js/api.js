@@ -1,124 +1,147 @@
+// --- Product Cache Configuration & Helpers ---
+const PRODUCT_CACHE_KEY = 'product_data_cache';
+const PRODUCT_CACHE_TIMESTAMP_KEY = 'product_data_cache_timestamp';
+const PRODUCT_CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
+
+function getProductCache() {
+    const cachedData = sessionStorage.getItem(PRODUCT_CACHE_KEY);
+    if (cachedData) {
+        try {
+            return JSON.parse(cachedData);
+        } catch (e) {
+            console.error("Error parsing product cache:", e);
+            invalidateProductCache(); // Clear corrupted cache
+            return null;
+        }
+    }
+    return null;
+}
+
+function setProductCache(products) {
+    try {
+        sessionStorage.setItem(PRODUCT_CACHE_KEY, JSON.stringify(products));
+        sessionStorage.setItem(PRODUCT_CACHE_TIMESTAMP_KEY, Date.now().toString());
+    } catch (e) {
+        console.error("Error setting product cache:", e);
+        // This might happen if sessionStorage is full.
+    }
+}
+
+function isProductCacheValid() {
+    const timestamp = sessionStorage.getItem(PRODUCT_CACHE_TIMESTAMP_KEY);
+    if (!timestamp) return false;
+    const cacheAge = Date.now() - parseInt(timestamp, 10);
+    return cacheAge < PRODUCT_CACHE_DURATION_MS;
+}
+
+function invalidateProductCache() {
+    sessionStorage.removeItem(PRODUCT_CACHE_KEY);
+    sessionStorage.removeItem(PRODUCT_CACHE_TIMESTAMP_KEY);
+    console.log("Product cache invalidated.");
+}
+// --- End Product Cache ---
+
 // generateNameTokens function removed
 
 const productAPI_firestore = {
-    async getProducts(params = {}) {
-        const PRODUCTS_PER_PAGE = params.limit || 10;
+    async fetchAllProductsFromFirestore() {
         try {
-            const activeSearchTerm = params.searchTerm ? params.searchTerm.trim() : '';
+            const querySnapshot = await window.db.collection('products').orderBy('productCode', 'asc').get();
+            const products = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            console.log(`Fetched ${products.length} products from Firestore.`);
+            return products;
+        } catch (error) {
+            console.error("Error fetching all products from Firestore:", error);
+            throw error; // Re-throw the error to be handled by the caller
+        }
+    },
 
-            if (activeSearchTerm !== '') {
-                // --- Search Mode ---
-                let searchOffset = 0;
-                if (params.lastVisibleDocSnapshot &&
-                    params.lastVisibleDocSnapshot._isSearchPagingMarker &&
-                    params.lastVisibleDocSnapshot.searchTerm === activeSearchTerm) {
-                    searchOffset = params.lastVisibleDocSnapshot.nextOffset || 0;
-                }
+    async getProducts(params = {}) {
+        const { 
+            searchTerm = '', 
+            limit = 10, 
+            page = 1 // Default to page 1
+        } = params;
 
-                let combinedProducts = [];
-                const productIds = new Set(); // For de-duplication
-                const lowerCaseSearchTerm = activeSearchTerm.toLowerCase();
+        try {
+            let allProducts = [];
+            if (isProductCacheValid()) {
+                allProducts = getProductCache();
+                console.log("Loaded products from cache.");
+            } else {
+                allProducts = await this.fetchAllProductsFromFirestore();
+                setProductCache(allProducts);
+                console.log("Fetched products from Firestore and cached.");
+            }
 
-                // Since Firestore queries are case-sensitive for string comparisons,
-                // and we need case-insensitive search for 'name' and 'Chinese Name',
-                // the most straightforward way without altering DB schema (e.g., adding lowercase fields)
-                // is to fetch all documents and filter client-side.
-                // This is NOT PERFORMANT for large datasets.
-                // A better solution would involve backend changes or a search service like Algolia/Elasticsearch.
+            if (!allProducts) { // Should not happen if fetchAllProductsFromFirestore throws error on failure
+                allProducts = [];
+            }
+            
+            let processedProducts = [...allProducts]; // Create a mutable copy
 
-                // Fetch all products
-                const allProductsSnapshot = await window.db.collection('products').get();
-
-                allProductsSnapshot.docs.forEach(doc => {
-                    const product = { id: doc.id, ...doc.data() };
+            // Apply search if searchTerm is provided
+            if (searchTerm.trim() !== '') {
+                const lowerCaseSearchTerm = searchTerm.trim().toLowerCase();
+                processedProducts = processedProducts.filter(product => {
                     let match = false;
-
-                    // 1. Check productCode (exact match, case-sensitive as it's an identifier)
-                    if (product.productCode && product.productCode === activeSearchTerm) {
+                    if (product.productCode && product.productCode.toLowerCase().includes(lowerCaseSearchTerm)) {
                         match = true;
                     }
-
-                    // 2. Check name (case-insensitive)
                     if (!match && product.name && product.name.toLowerCase().includes(lowerCaseSearchTerm)) {
                         match = true;
                     }
-
-                    // 3. Check Chinese Name (case-insensitive)
                     if (!match && product['Chinese Name'] && product['Chinese Name'].toLowerCase().includes(lowerCaseSearchTerm)) {
                         match = true;
                     }
-
-                    if (match && !productIds.has(doc.id)) {
-                        combinedProducts.push(product);
-                        productIds.add(doc.id);
-                    }
+                    return match;
                 });
-
-                // Sort the combined results (e.g., by productCode, then name for stability)
-                combinedProducts.sort((a, b) => {
-                    if (a.productCode < b.productCode) return -1;
-                    if (a.productCode > b.productCode) return 1;
-                    if (a.name < b.name) return -1;
-                    if (a.name > b.name) return 1;
-                    return 0;
-                });
-
-                // Client-side pagination from the merged and sorted list
-                const paginatedProducts = combinedProducts.slice(searchOffset, searchOffset + PRODUCTS_PER_PAGE);
-
-                let hasNextPage = (searchOffset + PRODUCTS_PER_PAGE < combinedProducts.length);
-                let nextSearchMarker = null;
-
-                if (hasNextPage) {
-                    nextSearchMarker = {
-                        _isSearchPagingMarker: true,
-                        searchTerm: activeSearchTerm,
-                        nextOffset: searchOffset + PRODUCTS_PER_PAGE,
-                    };
-                }
-
-                return {
-                    data: paginatedProducts,
-                    lastVisibleDocSnapshot: nextSearchMarker,
-                    hasNextPage: hasNextPage
-                };
-
-            } else {
-                // --- Non-Search Mode (Standard Browsing/Pagination) ---
-                let productsQuery = window.db.collection('products').orderBy('productCode', 'asc');
-
-                if (params.lastVisibleDocSnapshot && !params.lastVisibleDocSnapshot._isSearchPagingMarker) {
-                    productsQuery = productsQuery.startAfter(params.lastVisibleDocSnapshot);
-                }
-
-                productsQuery = productsQuery.limit(PRODUCTS_PER_PAGE);
-
-                const querySnapshot = await productsQuery.get();
-                const products = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-                const actualLastFirestoreDoc = querySnapshot.docs.length > 0 ? querySnapshot.docs[querySnapshot.docs.length - 1] : null;
-
-                let hasNextPage = false;
-                if (actualLastFirestoreDoc) {
-                    const nextPageQuery = window.db.collection('products')
-                        .orderBy('productCode', 'asc')
-                        .startAfter(actualLastFirestoreDoc)
-                        .limit(1);
-                    const nextPageSnapshot = await nextPageQuery.get();
-                    if (!nextPageSnapshot.empty) {
-                        hasNextPage = true;
-                    }
-                }
-
-                return {
-                    data: products,
-                    lastVisibleDocSnapshot: actualLastFirestoreDoc,
-                    hasNextPage: hasNextPage
-                };
             }
+
+            // Sort products (consistent sort order)
+            // Current sort is by productCode, then name. Replicate this.
+            processedProducts.sort((a, b) => {
+                if (a.productCode < b.productCode) return -1;
+                if (a.productCode > b.productCode) return 1;
+                if (a.name && b.name && a.name < b.name) return -1;
+                if (a.name && b.name && a.name > b.name) return 1;
+                return 0;
+            });
+
+            // Apply pagination
+            const offset = (page - 1) * limit;
+            const paginatedProducts = processedProducts.slice(offset, offset + limit);
+            const hasNextPage = (offset + limit) < processedProducts.length;
+            const totalProducts = processedProducts.length;
+            const totalPages = Math.ceil(totalProducts / limit);
+
+            return {
+                data: paginatedProducts,
+                pagination: {
+                    currentPage: page,
+                    itemsPerPage: limit,
+                    totalItems: totalProducts,
+                    totalPages: totalPages,
+                    hasNextPage: hasNextPage,
+                    // We no longer use Firestore snapshots for paging, 
+                    // so lastVisibleDocSnapshot is removed.
+                    // The UI will need to manage page numbers.
+                }
+            };
+
         } catch (error) {
-            console.error("Error fetching products from Firestore:", error);
-            throw error;
+            console.error("Error in getProducts (cache/client-side):", error);
+            // Gracefully return empty if there's an issue, or rethrow
+            return { 
+                data: [], 
+                pagination: { 
+                    currentPage: 1, 
+                    itemsPerPage: limit, 
+                    totalItems: 0, 
+                    totalPages: 0, 
+                    hasNextPage: false 
+                } 
+            };
         }
     },
 
@@ -130,6 +153,7 @@ const productAPI_firestore = {
                 ...productData, // name is stored as is from productData
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
+            invalidateProductCache(); // Invalidate cache after adding
             return { id: docRef.id, ...productData }; // Return original productData + id
         } catch (error) {
             console.error("Error adding product to Firestore:", error);
@@ -162,6 +186,7 @@ const productAPI_firestore = {
             updateData.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
 
             await productDocRef.update(updateData);
+            invalidateProductCache(); // Invalidate cache after updating
             return { id: productId, ...updateData }; // Return what was sent for update, plus ID
         } catch (error) {
             console.error("Error updating product in Firestore:", error);
@@ -173,8 +198,9 @@ const productAPI_firestore = {
         try {
             const productDocRef = window.db.collection('products').doc(productId);
             await productDocRef.delete();
+            invalidateProductCache(); // Invalidate cache after deleting
             return { id: productId };
-        } catch (error) {
+        } catch (error) { // Added curly brace for catch block
             console.error("Error deleting product from Firestore:", error);
             throw error;
         }
@@ -230,7 +256,9 @@ const productAPI_firestore = {
 window.productAPI = productAPI_firestore;
 
 // --- Cache Configuration ---
-const CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+// This CACHE_DURATION_MS is for warehouse and productMap, not for the new product cache.
+// It can be kept or removed if not used elsewhere after product cache is primary.
+const CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes 
 
 let warehouseCache = {
     data: null,
@@ -250,6 +278,7 @@ window.inventoryAPI = {
             let productMap;
 
             // 缓存仓库
+            // Uses its own CACHE_DURATION_MS, not PRODUCT_CACHE_DURATION_MS
             if (warehouseCache.data && (now - warehouseCache.timestamp < CACHE_DURATION_MS)) {
                 allWarehouses = warehouseCache.data;
             } else {
@@ -260,9 +289,12 @@ window.inventoryAPI = {
             }
 
             // 缓存产品映射
+            // Uses its own CACHE_DURATION_MS
             if (productMapCache.data && (now - productMapCache.timestamp < CACHE_DURATION_MS)) {
                 productMap = productMapCache.data;
             } else {
+                // This also fetches all products. If product cache is populated, this could potentially use it.
+                // However, for now, keeping it separate to avoid circular dependencies or complex logic.
                 const productsSnapshot = await window.db.collection('products').get();
                 productMap = new Map();
                 productsSnapshot.docs.forEach(doc => {
