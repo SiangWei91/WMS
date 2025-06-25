@@ -810,24 +810,52 @@ async function loadPendingJordonStock() {
 
         const inventoryItems = pendingInventorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         
-        // Collect all unique product codes
-        const productCodesToFetch = inventoryItems
+        // Collect all unique product codes from inventory items
+        const originalJordonCodes = inventoryItems
             .map(item => item.productCode)
             .filter(code => code); // Filter out undefined/empty codes
 
-        // Fetch product details in batch
-        const productDetailsMap = await fetchProductDetailsByCodes(db, productCodesToFetch);
+        // Create an expanded set of codes to fetch from the 'products' collection
+        const codesToActuallyFetch = new Set();
+        originalJordonCodes.forEach(code => {
+            codesToActuallyFetch.add(code); // Add original code
+            if (code.endsWith('.1')) {
+                codesToActuallyFetch.add(code.slice(0, -2)); // Add trimmed version if original ends with .1
+            } else {
+                codesToActuallyFetch.add(code + '.1'); // Add suffixed version if original does not end with .1
+            }
+        });
+        const productCodesForDbQuery = Array.from(codesToActuallyFetch);
+
+        // Fetch product details for all potential variations
+        const productDetailsMap = await fetchProductDetailsByCodes(db, productCodesForDbQuery);
 
         const pendingItemsWithProducts = inventoryItems.map(inventoryItem => {
             let productName = 'N/A';
             let productPackaging = 'N/A';
 
-            if (inventoryItem.productCode && productDetailsMap.has(inventoryItem.productCode)) {
-                const details = productDetailsMap.get(inventoryItem.productCode);
+            let details;
+            if (inventoryItem.productCode) {
+                details = productDetailsMap.get(inventoryItem.productCode); // Primary lookup
+                if (!details) {
+                    // Symmetrical Fallback logic
+                    if (inventoryItem.productCode.endsWith('.1')) {
+                        const trimmedCode = inventoryItem.productCode.slice(0, -2);
+                        details = productDetailsMap.get(trimmedCode);
+                        if (details) console.log(`Fallback success for ${inventoryItem.productCode} as ${trimmedCode} in pending stock`);
+                    } else {
+                        const suffixedCode = inventoryItem.productCode + '.1';
+                        details = productDetailsMap.get(suffixedCode);
+                        if (details) console.log(`Fallback success for ${inventoryItem.productCode} as ${suffixedCode} in pending stock`);
+                    }
+                }
+            }
+
+            if (details) {
                 productName = details.name;
                 productPackaging = details.packaging;
             } else if (inventoryItem.productCode) {
-                console.warn(`Product details not found in map for productCode: ${inventoryItem.productCode}`);
+                console.warn(`Product details not found for ${inventoryItem.productCode} (after all fallbacks) in pending stock.`);
             } else {
                 console.warn(`Inventory item ${inventoryItem.id} missing productCode.`);
             }
@@ -924,41 +952,58 @@ async function loadInventorySummaryData() {
 
         const inventoryItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        const productCodesToFetch = inventoryItems
+        // Collect all unique product codes from inventory items
+        const originalJordonCodes = inventoryItems
             .map(item => item.productCode)
-            .filter(code => code);
+            .filter(code => code); // Filter out undefined/empty codes
+        
+        // Create an expanded set of codes to fetch from the 'products' collection
+        const codesToActuallyFetch = new Set();
+        originalJordonCodes.forEach(code => {
+            codesToActuallyFetch.add(code); // Add original code
+            if (code.endsWith('.1')) {
+                codesToActuallyFetch.add(code.slice(0, -2)); // Add trimmed version if original ends with .1
+            } else {
+                codesToActuallyFetch.add(code + '.1'); // Add suffixed version if original does not end with .1
+            }
+        });
+        const productCodesForDbQuery = Array.from(codesToActuallyFetch);
 
-        const productDetailsMap = await fetchProductDetailsByCodes(db, productCodesToFetch);
+        // Fetch product details for all potential variations
+        const productDetailsMap = await fetchProductDetailsByCodes(db, productCodesForDbQuery);
 
         const summaryItems = inventoryItems.map(inventoryItem => {
             let productName = 'N/A';
             let productPackaging = 'N/A';
-            let productId = null; // Product document ID from 'products' collection
+            let productId = null; 
+            let details;
 
-            if (inventoryItem.productCode && productDetailsMap.has(inventoryItem.productCode)) {
-                const details = productDetailsMap.get(inventoryItem.productCode);
+            if (inventoryItem.productCode) {
+                details = productDetailsMap.get(inventoryItem.productCode); // Primary lookup
+                if (!details) {
+                    // Symmetrical Fallback logic
+                    if (inventoryItem.productCode.endsWith('.1')) {
+                        const trimmedCode = inventoryItem.productCode.slice(0, -2);
+                        details = productDetailsMap.get(trimmedCode);
+                        if (details) console.log(`Fallback success for ${inventoryItem.productCode} as ${trimmedCode} in Jordon summary`);
+                    } else {
+                        const suffixedCode = inventoryItem.productCode + '.1';
+                        details = productDetailsMap.get(suffixedCode);
+                        if (details) console.log(`Fallback success for ${inventoryItem.productCode} as ${suffixedCode} in Jordon summary`);
+                    }
+                }
+            }
+
+            if (details) {
                 productName = details.name;
                 productPackaging = details.packaging;
-                // If fetchProductDetailsByCodes was modified to return productId, assign it here
-                // productId = details.productId; 
-                // For now, if productId is critical, fetchProductDetailsByCodes needs to include it.
-                // The original code fetched it, so let's adjust fetchProductDetailsByCodes if necessary,
-                // or re-fetch here if it's simpler for now (though less optimal).
-                // For this iteration, assuming product document ID isn't strictly needed for the summary display itself,
-                // but it was in the original `summaryItems.push`.
-                // To keep consistency with original data structure for `displayInventorySummary` that might use `productId`:
-                // We need to ensure `fetchProductDetailsByCodes` can provide `doc.id` as `productId`.
-                // Let's assume `fetchProductDetailsByCodes` is updated or we accept `productId` might be missing for now.
-                // The current `fetchProductDetailsByCodes` does NOT return the product's Firestore document ID.
-                // This means `item.productId` in `displayInventorySummary` will be undefined.
-                // If this is an issue, `fetchProductDetailsByCodes` needs to be enhanced.
-                // For now, proceeding without product's Firestore doc ID.
+                // productId = details.productId; // Assuming fetchProductDetailsByCodes could provide this
             } else if (inventoryItem.productCode) {
-                console.warn(`Product details not found in map for productCode: ${inventoryItem.productCode} during summary load.`);
+                console.warn(`Product details not found for ${inventoryItem.productCode} (after all fallbacks) in Jordon summary`);
             } else {
                 console.warn(`Inventory item ${inventoryItem.id} missing productCode during summary load.`);
             }
-            return { ...inventoryItem, productName, productPackaging, productId }; // productId will be null here
+            return { ...inventoryItem, productName, productPackaging, productId };
         });
         
         console.log('Loaded Jordon inventory summary data:', summaryItems);
