@@ -9,46 +9,47 @@ const productAPI_firestore = {
             if (activeSearchTerm !== '') {
                 // --- Search Mode ---
                 let searchOffset = 0;
-                // Check if the provided snapshot is our search pagination marker & for the same search term
-                if (params.lastVisibleDocSnapshot && 
+                if (params.lastVisibleDocSnapshot &&
                     params.lastVisibleDocSnapshot._isSearchPagingMarker &&
                     params.lastVisibleDocSnapshot.searchTerm === activeSearchTerm) {
                     searchOffset = params.lastVisibleDocSnapshot.nextOffset || 0;
                 }
 
-                // Limit for fetching from Firestore during each of the name/code queries.
-                const SEARCH_FIRESTORE_FETCH_LIMIT = 150; 
                 let combinedProducts = [];
                 const productIds = new Set(); // For de-duplication
+                const lowerCaseSearchTerm = activeSearchTerm.toLowerCase();
 
-                // Queries for name and productCode
-                const nameQuery = window.db.collection('products')
-                                    .orderBy('name')
-                                    .startAt(activeSearchTerm)
-                                    .endAt(activeSearchTerm + '\uf8ff')
-                                    .limit(SEARCH_FIRESTORE_FETCH_LIMIT);
-                
-                const codeQuery = window.db.collection('products')
-                                    .orderBy('productCode')
-                                    .startAt(activeSearchTerm)
-                                    .endAt(activeSearchTerm + '\uf8ff')
-                                    .limit(SEARCH_FIRESTORE_FETCH_LIMIT);
+                // Since Firestore queries are case-sensitive for string comparisons,
+                // and we need case-insensitive search for 'name' and 'Chinese Name',
+                // the most straightforward way without altering DB schema (e.g., adding lowercase fields)
+                // is to fetch all documents and filter client-side.
+                // This is NOT PERFORMANT for large datasets.
+                // A better solution would involve backend changes or a search service like Algolia/Elasticsearch.
 
-                const [nameSnapshots, codeSnapshots] = await Promise.all([
-                    nameQuery.get(),
-                    codeQuery.get()
-                ]);
+                // Fetch all products
+                const allProductsSnapshot = await window.db.collection('products').get();
 
-                nameSnapshots.docs.forEach(doc => {
-                    if (!productIds.has(doc.id)) {
-                        combinedProducts.push({ id: doc.id, ...doc.data() });
-                        productIds.add(doc.id);
+                allProductsSnapshot.docs.forEach(doc => {
+                    const product = { id: doc.id, ...doc.data() };
+                    let match = false;
+
+                    // 1. Check productCode (exact match, case-sensitive as it's an identifier)
+                    if (product.productCode && product.productCode === activeSearchTerm) {
+                        match = true;
                     }
-                });
 
-                codeSnapshots.docs.forEach(doc => {
-                    if (!productIds.has(doc.id)) {
-                        combinedProducts.push({ id: doc.id, ...doc.data() });
+                    // 2. Check name (case-insensitive)
+                    if (!match && product.name && product.name.toLowerCase().includes(lowerCaseSearchTerm)) {
+                        match = true;
+                    }
+
+                    // 3. Check Chinese Name (case-insensitive)
+                    if (!match && product['Chinese Name'] && product['Chinese Name'].toLowerCase().includes(lowerCaseSearchTerm)) {
+                        match = true;
+                    }
+
+                    if (match && !productIds.has(doc.id)) {
+                        combinedProducts.push(product);
                         productIds.add(doc.id);
                     }
                 });
@@ -57,29 +58,28 @@ const productAPI_firestore = {
                 combinedProducts.sort((a, b) => {
                     if (a.productCode < b.productCode) return -1;
                     if (a.productCode > b.productCode) return 1;
-                    // If product codes are the same, sort by name
                     if (a.name < b.name) return -1;
                     if (a.name > b.name) return 1;
                     return 0;
                 });
-                
+
                 // Client-side pagination from the merged and sorted list
                 const paginatedProducts = combinedProducts.slice(searchOffset, searchOffset + PRODUCTS_PER_PAGE);
-                
+
                 let hasNextPage = (searchOffset + PRODUCTS_PER_PAGE < combinedProducts.length);
                 let nextSearchMarker = null;
 
                 if (hasNextPage) {
                     nextSearchMarker = {
-                        _isSearchPagingMarker: true, 
-                        searchTerm: activeSearchTerm, 
-                        nextOffset: searchOffset + PRODUCTS_PER_PAGE, 
+                        _isSearchPagingMarker: true,
+                        searchTerm: activeSearchTerm,
+                        nextOffset: searchOffset + PRODUCTS_PER_PAGE,
                     };
                 }
-                
+
                 return {
                     data: paginatedProducts,
-                    lastVisibleDocSnapshot: nextSearchMarker, 
+                    lastVisibleDocSnapshot: nextSearchMarker,
                     hasNextPage: hasNextPage
                 };
 
@@ -87,34 +87,33 @@ const productAPI_firestore = {
                 // --- Non-Search Mode (Standard Browsing/Pagination) ---
                 let productsQuery = window.db.collection('products').orderBy('productCode', 'asc');
 
-                // Use Firestore cursor if lastVisibleDocSnapshot is a valid Firestore snapshot (not our search marker)
                 if (params.lastVisibleDocSnapshot && !params.lastVisibleDocSnapshot._isSearchPagingMarker) {
                     productsQuery = productsQuery.startAfter(params.lastVisibleDocSnapshot);
                 }
-                
+
                 productsQuery = productsQuery.limit(PRODUCTS_PER_PAGE);
 
                 const querySnapshot = await productsQuery.get();
                 const products = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                
+
                 const actualLastFirestoreDoc = querySnapshot.docs.length > 0 ? querySnapshot.docs[querySnapshot.docs.length - 1] : null;
-                
+
                 let hasNextPage = false;
                 if (actualLastFirestoreDoc) {
                     const nextPageQuery = window.db.collection('products')
-                                           .orderBy('productCode', 'asc')
-                                           .startAfter(actualLastFirestoreDoc)
-                                           .limit(1);
+                        .orderBy('productCode', 'asc')
+                        .startAfter(actualLastFirestoreDoc)
+                        .limit(1);
                     const nextPageSnapshot = await nextPageQuery.get();
                     if (!nextPageSnapshot.empty) {
                         hasNextPage = true;
                     }
                 }
 
-                return { 
+                return {
                     data: products,
-                    lastVisibleDocSnapshot: actualLastFirestoreDoc, 
-                    hasNextPage: hasNextPage 
+                    lastVisibleDocSnapshot: actualLastFirestoreDoc,
+                    hasNextPage: hasNextPage
                 };
             }
         } catch (error) {
@@ -129,7 +128,7 @@ const productAPI_firestore = {
             // name_lowercase and name_tokens removed
             const docRef = await productsCollectionRef.add({
                 ...productData, // name is stored as is from productData
-                createdAt: firebase.firestore.FieldValue.serverTimestamp() 
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             return { id: docRef.id, ...productData }; // Return original productData + id
         } catch (error) {
@@ -161,7 +160,7 @@ const productAPI_firestore = {
             // logic for name_lowercase and name_tokens removed
 
             updateData.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
-            
+
             await productDocRef.update(updateData);
             return { id: productId, ...updateData }; // Return what was sent for update, plus ID
         } catch (error) {
@@ -174,7 +173,7 @@ const productAPI_firestore = {
         try {
             const productDocRef = window.db.collection('products').doc(productId);
             await productDocRef.delete();
-            return { id: productId }; 
+            return { id: productId };
         } catch (error) {
             console.error("Error deleting product from Firestore:", error);
             throw error;
@@ -190,44 +189,45 @@ const productAPI_firestore = {
                 return null;
             }
             const productDoc = snapshot.docs[0];
-            return { id: productDoc.id, ...productDoc.data() }; 
+            return { id: productDoc.id, ...productDoc.data() };
         } catch (error) {
             console.error(`Error fetching product by code ${productCode} from Firestore:`, error);
-            throw error; 
+            throw error;
         }
-    }, 
+    },
 
     async searchProductsByName(searchText) {
         if (!searchText || searchText.trim() === "") {
-            return []; 
+            return [];
         }
 
         const productsCollectionRef = window.db.collection("products");
-        const searchTerm = searchText.trim(); // No longer lowercasing here, Firestore handles casing for range.
+        const searchTerm = searchText.trim().toLowerCase(); // Lowercase for case-insensitive search
 
         try {
-            // Case-sensitive "starts-with" query on 'name' field
-            const querySnapshot = await productsCollectionRef
-                .where('name', '>=', searchTerm)
-                .where('name', '<=', searchTerm + '\uf8ff') // \uf8ff is a high Unicode char for range queries
-                .limit(10) 
-                .get();
+            // This is a simplified version. For true case-insensitive search on Firestore,
+            // you'd typically store a lowercase version of the 'name' field and query against that.
+            // The current .where('name', '>=', searchTerm) approach is case-sensitive.
+            // The following will fetch all and filter, which is inefficient for large datasets.
+            const querySnapshot = await productsCollectionRef.get();
             
             const products = [];
             querySnapshot.forEach(doc => {
-                products.push({ id: doc.id, ...doc.data() });
+                const data = doc.data();
+                if (data.name && data.name.toLowerCase().includes(searchTerm)) {
+                    products.push({ id: doc.id, ...data });
+                }
             });
             
-            // console.log(`Found ${products.length} products for search term: "${searchText}"`);
-            return products;
+            return products.slice(0,10); // Limit results
         } catch (error) {
-            // console.error(`Error searching products by name for "${searchText}": `, error);
-            throw error; 
+            console.error(`Error searching products by name for "${searchText}": `, error);
+            throw error;
         }
     }
 };
 
-window.productAPI = productAPI_firestore; 
+window.productAPI = productAPI_firestore;
 
 // --- Cache Configuration ---
 const CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
@@ -253,9 +253,9 @@ window.inventoryAPI = {
             // 1. Fetch warehouses (with caching)
             if (warehouseCache.data && (now - warehouseCache.timestamp < CACHE_DURATION_MS)) {
                 allWarehouses = warehouseCache.data;
-                console.log("Using cached warehouses");
+                // console.log("Using cached warehouses");
             } else {
-                console.log("Fetching warehouses from Firestore");
+                // console.log("Fetching warehouses from Firestore");
                 const warehousesSnapshot = await window.db.collection('warehouses').get();
                 allWarehouses = warehousesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 warehouseCache.data = allWarehouses;
@@ -265,9 +265,9 @@ window.inventoryAPI = {
             // 2. Fetch products and create a lookup map (with caching for productMap)
             if (productMapCache.data && (now - productMapCache.timestamp < CACHE_DURATION_MS)) {
                 productMap = productMapCache.data;
-                console.log("Using cached product map");
+                // console.log("Using cached product map");
             } else {
-                console.log("Fetching products from Firestore for product map");
+                // console.log("Fetching products from Firestore for product map");
                 const productsSnapshot = await window.db.collection('products').get();
                 productMap = new Map();
                 productsSnapshot.docs.forEach(doc => {
@@ -284,7 +284,7 @@ window.inventoryAPI = {
             }
 
             // 3. Fetch all inventory items (no caching for this part in this step)
-            console.log("Fetching inventory items from Firestore");
+            // console.log("Fetching inventory items from Firestore");
             const inventorySnapshot = await window.db.collection('inventory').get();
             const inventoryItems = inventorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
@@ -331,42 +331,33 @@ window.inventoryAPI = {
 window.transactionAPI = {
     async getTransactions(params = {}) {
         try {
-            // If fetching for a specific product, we might want all its transactions to calculate balance.
-            // So, use a larger limit. For general view, use a smaller default.
-            const defaultLimit = params.productCode ? 1000 : 10; 
+            const defaultLimit = params.productCode ? 1000 : 10;
             const limit = params.limit || defaultLimit;
             let query = window.db.collection('transactions');
 
-            // If a productCode is specified, filter by it and sort by date ascending for balance calculation.
             if (params.productCode) {
                 query = query.where('productCode', '==', params.productCode).orderBy('transactionDate', 'asc');
             } else {
-                // Default sort for the general transactions page (usually most recent first)
                 query = query.orderBy('transactionDate', 'desc');
             }
 
-            // Apply other filters
             if (params.type) {
                 query = query.where('type', '==', params.type);
             }
-            if (params.startDate) { 
-                // Ensure startDate is a Firestore Timestamp or Date object if comparing with 'transactionDate'
+            if (params.startDate) {
                 query = query.where('transactionDate', '>=', params.startDate);
             }
-            if (params.endDate) { 
-                // Ensure endDate is a Firestore Timestamp or Date object
+            if (params.endDate) {
                 query = query.where('transactionDate', '<=', params.endDate);
             }
-            
-            // Pagination: Only apply if not fetching for a specific productCode (where we typically want all)
-            // and if lastVisibleDocId is provided.
+
             if (params.lastVisibleDocId && !params.productCode) {
                 const lastDocSnapshot = await window.db.collection('transactions').doc(params.lastVisibleDocId).get();
                 if (lastDocSnapshot.exists) {
                     query = query.startAfter(lastDocSnapshot);
                 }
             }
-            
+
             query = query.limit(limit);
             const querySnapshot = await query.get();
             const transactions = querySnapshot.docs.map(doc => ({
@@ -383,8 +374,8 @@ window.transactionAPI = {
                 data: transactions,
                 pagination: {
                     lastVisibleDocId: lastVisibleDocId,
-                    hasNextPage: transactions.length === limit && !params.productCode, // hasNextPage might not be relevant if we fetch all for a product
-                    currentPage: params.currentPage || 1, 
+                    hasNextPage: transactions.length === limit && !params.productCode,
+                    currentPage: params.currentPage || 1,
                     itemsPerPage: limit
                 }
             };
@@ -396,20 +387,21 @@ window.transactionAPI = {
 
     async inboundStock(data) {
         const batch = window.db.batch();
-        const transactionRef = window.db.collection('transactions').doc(); 
+        const transactionRef = window.db.collection('transactions').doc();
         batch.set(transactionRef, {
             type: "inbound",
-            productId: data.productId, 
+            productId: data.productId,
             productCode: data.productCode,
-            productName: data.productName, 
+            productName: data.productName,
             warehouseId: data.warehouseId,
-            batchNo: data.batchNo || null, 
-            quantity: Number(data.quantity), 
+            batchNo: data.batchNo || null,
+            quantity: Number(data.quantity),
             operatorId: data.operatorId,
-            transactionDate: firebase.firestore.FieldValue.serverTimestamp()
+            transactionDate: firebase.firestore.FieldValue.serverTimestamp(),
+            description: data.description || `Stock in to ${data.warehouseId}.` // Added description
         });
         const inventoryQuery = window.db.collection('inventory')
-            .where('productId', '==', data.productId) 
+            .where('productId', '==', data.productId)
             .where('warehouseId', '==', data.warehouseId)
             .where('batchNo', '==', data.batchNo || null);
         const inventorySnapshot = await inventoryQuery.limit(1).get();
@@ -418,11 +410,11 @@ window.transactionAPI = {
             batch.update(inventoryDocRef, {
                 quantity: firebase.firestore.FieldValue.increment(Number(data.quantity)),
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
-                productName: data.productName, 
+                productName: data.productName,
                 productCode: data.productCode
             });
         } else {
-            const newInventoryRef = window.db.collection('inventory').doc(); 
+            const newInventoryRef = window.db.collection('inventory').doc();
             batch.set(newInventoryRef, {
                 productId: data.productId,
                 productCode: data.productCode,
@@ -430,19 +422,20 @@ window.transactionAPI = {
                 warehouseId: data.warehouseId,
                 batchNo: data.batchNo || null,
                 quantity: Number(data.quantity),
-                expiryDate: data.expiryDate ? new Date(data.expiryDate) : null, 
+                expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                // Consider if _3plDetails or other fields are needed for new items here
             });
         }
         await batch.commit();
         return { transactionId: transactionRef.id, status: "success" };
     },
 
-    async outboundStock(data) { // This function remains for general purpose outbound stock
+    async outboundStock(data) {
         const inventoryQuery = window.db.collection('inventory')
             .where('productId', '==', data.productId)
             .where('warehouseId', '==', data.warehouseId)
-            .where('batchNo', '==', data.batchNo || null); // Ensure batchNo comparison is correct
+            .where('batchNo', '==', data.batchNo || null);
         const inventorySnapshot = await inventoryQuery.limit(1).get();
 
         if (inventorySnapshot.empty) {
@@ -466,9 +459,10 @@ window.transactionAPI = {
             warehouseId: data.warehouseId,
             batchNo: data.batchNo || null,
             quantity: outboundQuantity,
-            operatorId: data.operatorId, // Make sure this is passed in `data`
+            operatorId: data.operatorId,
             transactionDate: firebase.firestore.FieldValue.serverTimestamp(),
-            relatedInventoryId: inventoryDoc.id // Store related inventory ID for traceability
+            relatedInventoryId: inventoryDoc.id,
+            description: data.description || `Stock out from ${data.warehouseId}.` // Added description
         });
 
         batch.update(inventoryDoc.ref, {
@@ -481,9 +475,8 @@ window.transactionAPI = {
     },
 
     async outboundStockByInventoryId(data) {
-        // data should include: inventoryId, quantityToDecrement, productCode, productName, operatorId, palletsToDecrement
         const inventoryDocRef = window.db.collection('inventory').doc(data.inventoryId);
-        const db = firebase.firestore(); 
+        const db = firebase.firestore();
 
         return db.runTransaction(async (transaction) => {
             const inventoryDoc = await transaction.get(inventoryDocRef);
@@ -495,72 +488,60 @@ window.transactionAPI = {
             const currentQuantity = currentItemData.quantity;
             const quantityToDecrement = Number(data.quantityToDecrement);
 
-            // Validate carton quantity
-            if (isNaN(quantityToDecrement) || quantityToDecrement < 0) { // Ensure non-negative, allows 0 if only pallets are moved (though unlikely)
+            if (isNaN(quantityToDecrement) || quantityToDecrement < 0) {
                 throw new Error("Quantity to decrement must be a non-negative number.");
             }
             if (currentQuantity < quantityToDecrement) {
                 throw new Error(`Insufficient carton stock for inventory item ${data.inventoryId} (${currentItemData.productCode}). Available: ${currentQuantity}, Requested: ${quantityToDecrement}.`);
             }
 
-            // Prepare for pallet quantity validation and deduction if applicable (Jordon items)
             let palletsToDecrementNum = 0;
             let currentPallets = 0;
-            let newPalletCount = 0; // Will hold the calculated new pallet count for Jordon items
+            let newPalletCount = 0;
 
             if (currentItemData.warehouseId === 'jordon') {
                 currentPallets = (currentItemData._3plDetails && currentItemData._3plDetails.pallet !== undefined)
-                                ? Number(currentItemData._3plDetails.pallet)
-                                : 0;
-                // Ensure data.palletsToDecrement is treated as a number, default to 0 if not provided or invalid
-                palletsToDecrementNum = (data.palletsToDecrement !== undefined && !isNaN(Number(data.palletsToDecrement))) 
-                                      ? Number(data.palletsToDecrement) 
-                                      : 0;
+                    ? Number(currentItemData._3plDetails.pallet)
+                    : 0;
+                palletsToDecrementNum = (data.palletsToDecrement !== undefined && !isNaN(Number(data.palletsToDecrement)))
+                    ? Number(data.palletsToDecrement)
+                    : 0;
 
-                if (palletsToDecrementNum < 0) { // Already validated in handleAddToStockOutList, but good to be safe
+                if (palletsToDecrementNum < 0) {
                     throw new Error(`Invalid pallet quantity to decrement (${data.palletsToDecrement}). Must be a non-negative number.`);
                 }
-                if (palletsToDecrementNum > currentPallets) { // Also validated earlier
+                if (palletsToDecrementNum > currentPallets) {
                     throw new Error(`Insufficient pallet stock for Jordon item ${data.inventoryId}. Available: ${currentPallets}, Requested: ${palletsToDecrementNum}.`);
                 }
                 newPalletCount = currentPallets - palletsToDecrementNum;
             }
 
-            // Product ID determination for logging
-            let effectiveProductId = data.productId; 
-            const inventoryProductId = currentItemData.productId; 
-            if (!effectiveProductId && inventoryProductId) {
-                effectiveProductId = inventoryProductId;
-                // console.warn for discrepancies can be re-added if needed
-            } else if (!inventoryProductId && !effectiveProductId) { // If both are missing
-                 console.warn(`Transaction Log for ${data.inventoryId}: productId is missing from both input data and inventory document. This indicates a data integrity issue.`);
-            }
-            // If effectiveProductId is still falsy after these checks, it will cause an error in transaction.set if required by rules
+            let effectiveProductId = data.productId || currentItemData.productId;
             if (!effectiveProductId) {
-                throw new Error(`Cannot log transaction for inventory ID ${data.inventoryId}: effectiveProductId is undefined/null. Please ensure the inventory item and product data are correctly linked.`);
+                 console.warn(`Transaction Log for ${data.inventoryId}: productId is missing. This indicates a data integrity issue.`);
+                 // Decide if this should throw an error or proceed with a placeholder if your DB/rules allow
             }
-            
-            // Log the transaction
+
+
             const transactionLogRef = db.collection('transactions').doc();
             const logData = {
                 type: "outbound",
-                inventoryId: data.inventoryId, 
-                productId: effectiveProductId, 
-                productCode: currentItemData.productCode || data.productCode, 
-                productName: currentItemData.productName || data.productName, 
-                warehouseId: currentItemData.warehouseId, 
-                batchNo: currentItemData.batchNo || null, 
-                quantity: quantityToDecrement, // Log carton quantity decremented
+                inventoryId: data.inventoryId,
+                productId: effectiveProductId, // Use determined product ID
+                productCode: currentItemData.productCode || data.productCode,
+                productName: currentItemData.productName || data.productName,
+                warehouseId: currentItemData.warehouseId,
+                batchNo: currentItemData.batchNo || null,
+                quantity: quantityToDecrement,
                 operatorId: data.operatorId,
                 transactionDate: firebase.firestore.FieldValue.serverTimestamp(),
-                description: `Stock out for transfer. Inventory ID: ${data.inventoryId}`
+                description: data.description || `Stock out for transfer. Inventory ID: ${data.inventoryId}`
             };
             if (currentItemData.warehouseId === 'jordon') {
-                logData.palletsDecremented = palletsToDecrementNum; // Log pallet quantity decremented
+                logData.palletsDecremented = palletsToDecrementNum;
             }
             transaction.set(transactionLogRef, logData);
 
-            // Prepare inventory update payload
             const newQuantity = currentQuantity - quantityToDecrement;
             const updatePayload = {
                 quantity: newQuantity,
@@ -568,20 +549,9 @@ window.transactionAPI = {
             };
 
             if (currentItemData.warehouseId === 'jordon') {
-                // Ensure _3plDetails structure exists if we are about to write to its pallet subfield
-                if (!currentItemData._3plDetails && palletsToDecrementNum >= 0) { // palletsToDecrementNum will be 0 if not provided
-                    updatePayload._3plDetails = { pallet: newPalletCount };
-                } else if (currentItemData._3plDetails || palletsToDecrementNum >= 0) { // If _3plDetails exists or we need to set pallet
-                    updatePayload['_3plDetails.pallet'] = newPalletCount;
-                }
-                
-                console.log(`Jordon item ${data.inventoryId}: Cartons ${currentQuantity}->${newQuantity}. Pallets ${currentPallets}->${newPalletCount}. (Decrement requested: ${palletsToDecrementNum} pallets)`);
-
-                // Safeguard: If all cartons are gone, pallets must be zero.
-                // This overrides the calculation if, for instance, user said 0 pallets out but took all cartons.
-                if (newQuantity === 0 && updatePayload['_3plDetails.pallet'] !== 0) {
-                    console.warn(`Jordon item ${data.inventoryId}: All cartons depleted. Forcing _3plDetails.pallet to 0 (was calculated as ${updatePayload['_3plDetails.pallet']}).`);
-                    if (!updatePayload._3plDetails) updatePayload._3plDetails = {};
+                updatePayload['_3plDetails.pallet'] = newPalletCount;
+                if (newQuantity === 0 && newPalletCount !== 0) {
+                    console.warn(`Jordon item ${data.inventoryId}: All cartons depleted. Forcing _3plDetails.pallet to 0.`);
                     updatePayload['_3plDetails.pallet'] = 0;
                 }
             }
@@ -589,70 +559,6 @@ window.transactionAPI = {
 
             return { transactionId: transactionLogRef.id, status: "success", inventoryId: data.inventoryId };
         });
-    },
-
-    // Reviewing inboundStock: It seems generally suitable.
-    // It creates a new inventory record if one doesn't exist for the product/warehouse/batch,
-    // or increments quantity if it does. This is the desired behavior for the destination warehouse.
-    // We need to ensure all necessary data (productId, productCode, productName, warehouseId, batchNo, quantity, operatorId)
-    // is correctly passed from handleSubmitAllStockOut.
-    async inboundStock(data) { // data: productId, productCode, productName, warehouseId, batchNo, quantity, operatorId, expiryDate (optional)
-        const db = window.db; // or firebase.firestore()
-        const batch = db.batch();
-        const transactionRef = db.collection('transactions').doc();
-
-        batch.set(transactionRef, {
-            type: "inbound",
-            productId: data.productId,
-            productCode: data.productCode,
-            productName: data.productName,
-            warehouseId: data.warehouseId, // Destination warehouse
-            batchNo: data.batchNo || null,
-            quantity: Number(data.quantity),
-            operatorId: data.operatorId,
-            transactionDate: firebase.firestore.FieldValue.serverTimestamp(),
-            description: `Stock in to ${data.warehouseId} from Jordon transfer.`
-        });
-
-        const inventoryQuery = db.collection('inventory')
-            .where('productId', '==', data.productId)
-            .where('warehouseId', '==', data.warehouseId)
-            .where('batchNo', '==', data.batchNo || null); // Ensure batchNo comparison is correct
-
-        const inventorySnapshot = await inventoryQuery.limit(1).get();
-
-        if (!inventorySnapshot.empty) {
-            const inventoryDocRef = inventorySnapshot.docs[0].ref;
-            batch.update(inventoryDocRef, {
-                quantity: firebase.firestore.FieldValue.increment(Number(data.quantity)),
-                lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
-                // Optionally update other fields if they can change, e.g., productName, though less likely for existing stock
-                productName: data.productName, // Ensure product name is consistent
-                productCode: data.productCode  // Ensure product code is consistent
-            });
-        } else {
-            const newInventoryRef = db.collection('inventory').doc();
-            // Ensure all necessary fields for a new inventory item are present in `data`
-            // or fetched/derived if necessary.
-            // For a transfer, core product details should remain the same.
-            // _3plDetails might need to be considered if the destination warehouse also uses it.
-            // For now, keeping it simple for the transferred item.
-            batch.set(newInventoryRef, {
-                productId: data.productId,
-                productCode: data.productCode,
-                productName: data.productName,
-                warehouseId: data.warehouseId, // Destination warehouse
-                batchNo: data.batchNo || null,
-                quantity: Number(data.quantity),
-                // expiryDate: data.expiryDate ? new Date(data.expiryDate) : null, // If expiry is tracked
-                lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
-                // Add any other relevant fields for a new inventory record in the destination.
-                // For example, if the destination uses _3plDetails, it might need default values.
-                // _3plDetails: { location: 'default_location', status: 'Complete', palletType: 'N/A' } // Example
-            });
-        }
-        await batch.commit();
-        return { transactionId: transactionRef.id, status: "success" };
     }
 };
 
@@ -663,35 +569,30 @@ window.dashboardAPI = {
         let todayTransactions = 0;
 
         try {
-            // Attempt to read pre-aggregated product count
             const productStatsRef = window.db.doc('system_stats/productStats');
             const productStatsDoc = await productStatsRef.get();
             if (productStatsDoc.exists) {
                 totalProducts = productStatsDoc.data().count || 0;
             } else {
-                console.warn("Product stats document (system_stats/productStats) not found. Displaying 0. Consider implementing server-side aggregation.");
+                console.warn("Product stats document (system_stats/productStats) not found.");
             }
         } catch (error) {
             console.error("Error fetching product stats:", error);
-            // totalProducts remains 0
         }
 
         try {
-            // Attempt to read pre-aggregated inventory quantity
             const inventoryStatsRef = window.db.doc('system_stats/inventoryStats');
             const inventoryStatsDoc = await inventoryStatsRef.get();
             if (inventoryStatsDoc.exists) {
                 totalInventory = inventoryStatsDoc.data().totalQuantity || 0;
             } else {
-                console.warn("Inventory stats document (system_stats/inventoryStats) not found. Displaying 0. Consider implementing server-side aggregation.");
+                console.warn("Inventory stats document (system_stats/inventoryStats) not found.");
             }
         } catch (error) {
             console.error("Error fetching inventory stats:", error);
-            // totalInventory remains 0
         }
 
         try {
-            // Fetch today's transactions (this query is generally efficient)
             const todayStart = new Date();
             todayStart.setHours(0, 0, 0, 0);
             const todayEnd = new Date();
@@ -703,9 +604,8 @@ window.dashboardAPI = {
             todayTransactions = todayTransactionsSnapshot.size;
         } catch (error) {
             console.error("Error fetching today's transactions:", error);
-            // todayTransactions remains 0
         }
-        
+
         return {
             totalProducts: totalProducts,
             totalInventory: totalInventory,
@@ -714,21 +614,21 @@ window.dashboardAPI = {
     }
 };
 
-console.log("productAPI, inventoryAPI, transactionAPI (inbound/outbound/getTransactions), and dashboardAPI now use Firestore. Dashboard API expects pre-aggregated stats for products and inventory.");
+// console.log("productAPI, inventoryAPI, transactionAPI, and dashboardAPI initialized.");
 
 window.jordonAPI = {
     async addJordonStockItems(itemsArray) {
         if (!itemsArray || itemsArray.length === 0) {
             throw new Error("No items provided to add.");
         }
-        const batch = window.db.batch(); 
-        const itemsCollectionRef = window.db.collection("jordonInventoryItems"); 
+        const batch = window.db.batch();
+        const itemsCollectionRef = window.db.collection("jordonInventoryItems");
         itemsArray.forEach(item => {
-            const newItemRef = itemsCollectionRef.doc(); 
+            const newItemRef = itemsCollectionRef.doc();
             const itemDataWithTimestamp = {
                 ...item,
-                totalCartons: Number(item.totalCartons) || 0, 
-                physicalPallets: Number(item.physicalPallets) || 0, 
+                totalCartons: Number(item.totalCartons) || 0,
+                physicalPallets: Number(item.physicalPallets) || 0,
                 stockInTimestamp: firebase.firestore.FieldValue.serverTimestamp()
             };
             batch.set(newItemRef, itemDataWithTimestamp);
@@ -738,15 +638,15 @@ window.jordonAPI = {
             return { success: true, count: itemsArray.length };
         } catch (error) {
             console.error("Error adding Jordon stock items in batch: ", error);
-            throw error; 
+            throw error;
         }
     },
     async getJordonInventoryItems() {
-        const itemsCollectionRef = window.db.collection("jordonInventoryItems"); 
+        const itemsCollectionRef = window.db.collection("jordonInventoryItems");
         try {
             const querySnapshot = await itemsCollectionRef
                 .orderBy("stockInTimestamp", "desc")
-                .orderBy("lotNumber", "asc")
+                .orderBy("lotNumber", "asc") // Assuming lotNumber exists and is relevant for ordering
                 .get();
             const items = [];
             querySnapshot.forEach(doc => {
@@ -755,7 +655,7 @@ window.jordonAPI = {
             return items;
         } catch (error) {
             console.error("Error fetching Jordon stock items: ", error);
-            throw error; 
+            throw error;
         }
     }
 };
