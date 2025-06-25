@@ -315,49 +315,31 @@ window.inventoryAPI = {
                 // productMap will remain empty, leading to 'Unknown Product' for items.
             }
 
-            // Fetch ALL transactions to calculate inventory client-side
-            console.log("InventoryAPI: Fetching all transactions for client-side aggregation.");
-            const transactionsSnapshot = await window.db.collection('transactions').get();
-            const inventoryData = {}; // Using an object for easier aggregation by productCode
+            // Fetch data from the inventory_aggregated collection
+            console.log("InventoryAPI: Fetching data from inventory_aggregated collection.");
+            const aggSnapshot = await window.db.collection('inventory_aggregated').get();
+            
+            if (aggSnapshot.empty) {
+                console.log("InventoryAPI: inventory_aggregated collection is empty.");
+            } else {
+                console.log(`InventoryAPI: Found ${aggSnapshot.size} documents in inventory_aggregated.`);
+            }
 
-            transactionsSnapshot.docs.forEach(doc => {
-                const tx = { id: doc.id, ...doc.data() };
+            const aggregatedInventory = aggSnapshot.docs.map(doc => {
+                const data = doc.data();
+                // Enrich with product details from the productMap (which is from session cache)
+                const productDetails = productMap.get(data.productCode) || { name: 'Unknown Product', packaging: '' };
 
-                if (!tx.productCode || tx.quantity === undefined || !tx.type || !tx.warehouseId) {
-                    console.warn(`InventoryAPI: Skipping transaction ${tx.id} due to missing fields.`);
-                    return;
-                }
-
-                if (!inventoryData[tx.productCode]) {
-                    const productDetails = productMap.get(tx.productCode) || { name: 'Unknown Product', packaging: '' };
-                    inventoryData[tx.productCode] = {
-                        productCode: tx.productCode,
-                        productName: productDetails.name,
-                        packaging: productDetails.packaging,
-                        totalQuantity: 0,
-                        quantitiesByWarehouseId: {}
-                    };
-                }
-
-                const item = inventoryData[tx.productCode];
-                const quantity = Number(tx.quantity);
-                let changeInQuantity = 0;
-
-                if (tx.type === 'inbound' || tx.type === 'initial') {
-                    changeInQuantity = quantity;
-                } else if (tx.type === 'outbound') {
-                    changeInQuantity = -quantity;
-                } else {
-                    console.warn(`InventoryAPI: Unknown transaction type ${tx.type} for tx ${tx.id}`);
-                    return; 
-                }
-                
-                item.totalQuantity += changeInQuantity;
-                item.quantitiesByWarehouseId[tx.warehouseId] = (item.quantitiesByWarehouseId[tx.warehouseId] || 0) + changeInQuantity;
+                return {
+                    productCode: data.productCode,
+                    productName: productDetails.name,
+                    packaging: productDetails.packaging,
+                    totalQuantity: data.totalQuantity || 0,
+                    quantitiesByWarehouseId: data.quantitiesByWarehouseId || {}
+                };
             });
             
-            const aggregatedInventory = Object.values(inventoryData);
-            console.log(`InventoryAPI: Client-side aggregation complete. ${aggregatedInventory.length} items processed.`);
+            console.log(`InventoryAPI: Processed ${aggregatedInventory.length} items from inventory_aggregated.`);
 
             return {
                 aggregatedInventory,
