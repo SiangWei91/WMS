@@ -135,9 +135,14 @@ function renderProductsTable(products) {
             createdAtDisplay = new Date(product.createdAt).toLocaleString();
         }
 
+        let productDescription = escapeHtml(product.name || '');
+        if (product['Chinese Name']) {
+            productDescription += ` ${escapeHtml(product['Chinese Name'])}`;
+        }
+
         row.innerHTML = `
             <td>${escapeHtml(product.productCode || '')}</td>
-            <td>${escapeHtml(product.name || '')}</td>
+            <td>${productDescription}</td>
             <td>${escapeHtml(product.packaging || '')}</td>
             <td>${escapeHtml(createdAtDisplay)}</td>
             <td class="actions">
