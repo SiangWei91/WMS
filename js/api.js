@@ -912,6 +912,124 @@ window.transactionAPI = {
             transactionListenerUnsubscribe = null;
             console.log("Real-time listener for transactions detached.");
         }
+    },
+
+    async performInternalTransfer(transferData) {
+        await ensureDbManager();
+        const { 
+            productId, productCode, productName, 
+            sourceWarehouseId, destinationWarehouseId, 
+            quantity, operatorId 
+        } = transferData;
+
+        const numericQuantity = Number(quantity);
+
+        // Prepare transaction data common parts
+        const commonTxData = {
+            productId: productId || null, // productId might be null if not found from aggregated view
+            productCode,
+            productName,
+            quantity: numericQuantity,
+            operatorId,
+            // batchNo could be added if relevant for transfers, or set to null/generic
+            batchNo: `TRANSFER-${sourceWarehouseId}-TO-${destinationWarehouseId}`, 
+        };
+
+        // Outbound transaction from source
+        const outboundTx = {
+            ...commonTxData,
+            type: "outbound",
+            warehouseId: sourceWarehouseId,
+            description: `Internal transfer to ${destinationWarehouseId}`
+        };
+
+        // Inbound transaction to destination
+        const inboundTx = {
+            ...commonTxData,
+            type: "inbound",
+            warehouseId: destinationWarehouseId,
+            description: `Internal transfer from ${sourceWarehouseId}`
+        };
+
+        if (navigator.onLine && window.db) {
+            // Online: Perform as a Firestore batch
+            console.log("Performing internal transfer online:", transferData);
+            const batch = window.db.batch();
+            
+            const outboundTxRef = window.db.collection('transactions').doc();
+            batch.set(outboundTxRef, { ...outboundTx, transactionDate: firebase.firestore.FieldValue.serverTimestamp() });
+            
+            const inboundTxRef = window.db.collection('transactions').doc();
+            batch.set(inboundTxRef, { ...inboundTx, transactionDate: firebase.firestore.FieldValue.serverTimestamp() });
+
+            await batch.commit();
+            console.log(`Internal transfer processed online. Outbound Tx ID: ${outboundTxRef.id}, Inbound Tx ID: ${inboundTxRef.id}`);
+            // Cloud Function will update inventory_aggregated, listener will update IDB inventory.
+            return { status: "success", outboundTxId: outboundTxRef.id, inboundTxId: inboundTxRef.id };
+        } else {
+            // Offline: Optimistically update IDB inventory and queue both transactions
+            console.log("Performing internal transfer offline, queueing transactions:", transferData);
+
+            // 1. Optimistic update for 'inventory' store in IDB
+            let sourceAggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, productCode);
+            if (!sourceAggItem) sourceAggItem = { productCode, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() };
+            
+            sourceAggItem.totalQuantity = (sourceAggItem.totalQuantity || 0) - numericQuantity;
+            sourceAggItem.quantitiesByWarehouseId[sourceWarehouseId] = (sourceAggItem.quantitiesByWarehouseId[sourceWarehouseId] || 0) - numericQuantity;
+            sourceAggItem.lastUpdated = new Date().toISOString();
+            sourceAggItem.pendingSync = true; 
+            await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.INVENTORY, sourceAggItem);
+
+            let destAggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, productCode);
+            if (!destAggItem) destAggItem = { productCode, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() };
+            // If it's the same item, it's already updated from sourceAggItem, so ensure we use the updated values
+            if(destAggItem.productCode === sourceAggItem.productCode) destAggItem = JSON.parse(JSON.stringify(sourceAggItem));
+
+
+            destAggItem.totalQuantity = (destAggItem.totalQuantity || 0) + numericQuantity; // Net total quantity for product might not change, but this reflects one side.
+                                                                                            // Cloud function will correctly sum. For optimistic, this is tricky.
+                                                                                            // Let's adjust: totalQuantity is sum of all warehouses.
+                                                                                            // Source decreases, dest increases, total remains same.
+            destAggItem.quantitiesByWarehouseId[destinationWarehouseId] = (destAggItem.quantitiesByWarehouseId[destinationWarehouseId] || 0) + numericQuantity;
+            destAggItem.lastUpdated = new Date().toISOString();
+            destAggItem.pendingSync = true;
+            await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.INVENTORY, destAggItem);
+            
+            // Correcting total quantity for the product in IDB after both adjustments
+            let finalProductAggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, productCode);
+            let newTotal = 0;
+            for(const whId in finalProductAggItem.quantitiesByWarehouseId){
+                newTotal += (finalProductAggItem.quantitiesByWarehouseId[whId] || 0);
+            }
+            finalProductAggItem.totalQuantity = newTotal;
+            await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.INVENTORY, finalProductAggItem);
+
+
+            // 2. Queue outbound transaction
+            const localOutboundTx = {
+                ...outboundTx,
+                id: `local_tx_${new Date().getTime()}_out_${Math.random().toString(36).substr(2, 5)}`,
+                transactionDate: new Date().toISOString(),
+                pendingSync: true
+            };
+            await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE, {
+                storeName: 'transactions', operation: 'outbound', payload: localOutboundTx, timestamp: new Date().toISOString()
+            });
+
+            // 3. Queue inbound transaction
+            const localInboundTx = {
+                ...inboundTx,
+                id: `local_tx_${new Date().getTime()}_in_${Math.random().toString(36).substr(2, 5)}`,
+                transactionDate: new Date().toISOString(),
+                pendingSync: true
+            };
+            await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE, {
+                storeName: 'transactions', operation: 'inbound', payload: localInboundTx, timestamp: new Date().toISOString()
+            });
+
+            console.log("Internal transfer transactions queued offline.");
+            return { status: "queued_offline", outboundTxId: localOutboundTx.id, inboundTxId: localInboundTx.id };
+        }
     }
 };
 
