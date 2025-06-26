@@ -238,12 +238,8 @@ document.addEventListener('DOMContentLoaded', function () {
               window.shipmentAPI.detachShipmentListener();
           }
           // Add similar detach logic for other listeners when implemented
-
-          // Clear any local non-persistent caches if necessary (IndexedDB is persistent)
-          // Example: if (typeof invalidateProductCache === 'function') { invalidateProductCache(); }
-          // This specific one was for session cache, which is removed for products.
-          // If other session caches exist, clear them.
-
+          
+          // IndexedDB is persistent, other session caches might need clearing if added.
           sessionStorage.removeItem('isAuthenticated'); 
           sessionStorage.removeItem('loggedInUser');
           window.location.href = 'login.html';
