@@ -755,72 +755,37 @@ async function loadWarehouseData() {
     }
 }
 
-async function fetchProductDetailsByCodes(db, productCodes) {
+async function fetchProductDetailsByCodes(productCodes) { // Removed db parameter, not needed
     const productDetailsMap = new Map();
     if (!productCodes || productCodes.length === 0) {
         return productDetailsMap;
     }
 
-    let allProductsFromCache = null;
-
-    // Check if cache is valid and try to get data
-    if (typeof isProductCacheValid === 'function' && isProductCacheValid() && typeof getProductCache === 'function') {
-        allProductsFromCache = getProductCache();
-    }
-
-    // If cache is not valid or empty, trigger a fetch which will populate the cache
-    if (!allProductsFromCache || allProductsFromCache.length === 0) {
-        console.log("Jordon: Product cache not valid or empty. Triggering cache population.");
-        try {
-            // Calling getProducts will ensure fetchAllProductsFromFirestore is called if cache is empty/invalid,
-            // and then the cache is set. We don't need the direct result here, just the side effect of caching.
-            if (window.productAPI && typeof window.productAPI.getProducts === 'function') {
-                await window.productAPI.getProducts({ page: 1, limit: 1 }); // Minimal call to trigger cache load
-                if (typeof getProductCache === 'function') {
-                    allProductsFromCache = getProductCache(); // Get the freshly populated cache
-                } else {
-                    console.error("Jordon: getProductCache function not found after attempting cache population.");
-                    return productDetailsMap; // Return empty map as we can't proceed
-                }
-            } else {
-                console.error("Jordon: window.productAPI.getProducts function not found. Cannot populate cache.");
-                return productDetailsMap; // Return empty map
-            }
-        } catch (error) {
-            console.error("Jordon: Error trying to populate product cache:", error);
-            return productDetailsMap; // Return empty map on error
-        }
-    }
-    
-    if (!allProductsFromCache || allProductsFromCache.length === 0) {
-        console.warn("Jordon: Product cache is still empty after attempting to load. Cannot provide product details.");
+    if (!window.productAPI || typeof window.productAPI.getProductByCode !== 'function') {
+        console.error("Jordon: window.productAPI.getProductByCode is not available. Cannot fetch product details.");
         return productDetailsMap;
     }
 
-    // Create a temporary map from the cached products for quick lookup by productCode
-    const cachedProductsMap = new Map();
-    allProductsFromCache.forEach(p => {
-        if (p.productCode) {
-            cachedProductsMap.set(p.productCode, {
-                name: p.name || 'N/A',
-                packaging: p.packaging || 'N/A',
-                productId: p.id // Keep product ID if needed
-            });
-        }
-    });
+    const uniqueProductCodes = [...new Set(productCodes)]; // Process unique codes
 
-    // Now, use the productCodes argument to populate the productDetailsMap from cachedProductsMap
-    const uniqueProductCodes = [...new Set(productCodes)]; 
-    uniqueProductCodes.forEach(code => {
-        if (cachedProductsMap.has(code)) {
-            productDetailsMap.set(code, cachedProductsMap.get(code));
+    for (const code of uniqueProductCodes) {
+        try {
+            const product = await window.productAPI.getProductByCode(code);
+            if (product) {
+                productDetailsMap.set(code, {
+                    name: product.name || 'N/A',
+                    packaging: product.packaging || 'N/A',
+                    productId: product.id 
+                });
+            } else {
+                // console.warn(`Jordon: Product details not found via productAPI for code: ${code}`);
+                // No need to explicitly warn here, the calling function will handle fallbacks or final warnings.
+            }
+        } catch (error) {
+            console.error(`Jordon: Error fetching product details for code ${code} via productAPI:`, error);
         }
-        // Note: The symmetrical fallback logic for ".1" codes is handled in the calling functions 
-        // (loadPendingJordonStock, loadInventorySummaryData) by them querying for both variations
-        // if needed, and then this function (fetchProductDetailsByCodes) will be called with all those variations.
-        // So, this function just needs to return details for the codes it's explicitly asked for.
-    });
-
+    }
+    // console.log("Jordon: fetchProductDetailsByCodes completed. Map size:", productDetailsMap.size);
     return productDetailsMap;
 }
 
@@ -859,7 +824,7 @@ async function loadPendingJordonStock() {
         const productCodesForDbQuery = Array.from(codesToActuallyFetch);
 
         // Fetch product details for all potential variations
-        const productDetailsMap = await fetchProductDetailsByCodes(db, productCodesForDbQuery);
+        const productDetailsMap = await fetchProductDetailsByCodes(productCodesForDbQuery);
 
         const pendingItemsWithProducts = inventoryItems.map(inventoryItem => {
             let productName = 'N/A';
@@ -1001,7 +966,7 @@ async function loadInventorySummaryData() {
         const productCodesForDbQuery = Array.from(codesToActuallyFetch);
 
         // Fetch product details for all potential variations
-        const productDetailsMap = await fetchProductDetailsByCodes(db, productCodesForDbQuery);
+        const productDetailsMap = await fetchProductDetailsByCodes(productCodesForDbQuery);
 
         const summaryItems = inventoryItems.map(inventoryItem => {
             let productName = 'N/A';
