@@ -15,63 +15,201 @@ const NAV_ITEM_SINGLONG_HTML = `
         <span>Sing Long</span>
     </li>`;
 
+// Debounce function
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
 // 主应用逻辑
 document.addEventListener('DOMContentLoaded', function () {
   // Firebase Auth State Change Listener
-  firebase.auth().onAuthStateChanged(async user => { // Made async
+  firebase.auth().onAuthStateChanged(async user => { 
       if (user) {
-          // User is signed in.
           console.log('onAuthStateChanged (app.js): User signed in:', user.uid);
-
-          let displayName = user.uid; // Default to UID
+          let displayName = user.uid; 
           try {
-              const idTokenResult = await user.getIdTokenResult(true); // Force refresh to get latest claims
+              const idTokenResult = await user.getIdTokenResult(true); 
               if (idTokenResult.claims.name) {
                   displayName = idTokenResult.claims.name;
-                  console.log('User display name from claims:', displayName);
-              } else {
-                  console.log('Name claim not found, using UID.');
               }
           } catch (error) {
               console.error('Error getting ID token result:', error);
-              // displayName remains user.uid in case of error
           }
 
-          // Set session storage items
           sessionStorage.setItem('isAuthenticated', 'true'); 
-          sessionStorage.setItem('loggedInUser', displayName); // Use displayName from claims or UID
+          sessionStorage.setItem('loggedInUser', displayName); 
 
-          // --- APPLICATION INITIALIZATION LOGIC ---
           const sidebar = document.querySelector('.sidebar');
           const sidebarToggle = document.querySelector('.sidebar-toggle');
-          const mainContent = document.querySelector('.main-content'); 
-
-          if (sidebarToggle && sidebar && mainContent) { 
+          
+          if (sidebarToggle && sidebar) { 
             sidebarToggle.addEventListener('click', function () {
               sidebar.classList.toggle('sidebar-collapsed');
             });
           }
 
-          // Initialize navigation and load initial page
-          initNavigation(); // Defined below
-          loadDashboard();  // Defined below
+          initNavigation(); 
+          loadDashboard();  
 
-          // Avatar Dropdown Logic
+          // Initialize Product Listener after ensuring IndexedDB is ready
+          if (window.indexedDBManagerReady) {
+            window.indexedDBManagerReady.then(() => {
+              console.log("IndexedDB is ready, attempting to attach product listener.");
+              if (window.productAPI && typeof window.productAPI.listenToProductChanges === 'function') {
+                  const debouncedLoadProducts = debounce(loadProducts, 500); 
+
+                  window.productAPI.listenToProductChanges((updateInfo) => {
+                      if (updateInfo.error) {
+                          console.error("Error from product listener callback:", updateInfo.error);
+                          return;
+                      }
+                      console.log('Product data changed via listener:', updateInfo);
+                      const activePageLi = document.querySelector('.sidebar nav ul li.active');
+                      if (activePageLi && activePageLi.dataset.page === 'products') {
+                          console.log('Product page is active, reloading product list via debounced function...');
+                          if (typeof loadProducts === 'function') {
+                              debouncedLoadProducts();
+                          } else {
+                              console.warn("loadProducts function is not defined, cannot refresh product list.");
+                          }
+                      } else {
+                          console.log("Product page not active, IndexedDB updated in background.");
+                      }
+                  });
+              } else {
+                  console.warn('productAPI.listenToProductChanges is not available to attach listener.');
+              }
+            }).catch(err => {
+                console.error("Failed to initialize IndexedDBManager in app.js, product listener not attached:", err);
+            });
+          } else {
+            console.error("indexedDBManagerReady promise not found in app.js. Cannot attach product listener.");
+          }
+
+          // Initialize Inventory Listener after ensuring IndexedDB is ready
+          if (window.indexedDBManagerReady) {
+            window.indexedDBManagerReady.then(() => {
+              console.log("IndexedDB is ready, attempting to attach inventory listener.");
+              if (window.inventoryAPI && typeof window.inventoryAPI.listenToInventoryChanges === 'function') {
+                  const debouncedLoadInventory = debounce(loadInventory, 500);
+
+                  window.inventoryAPI.listenToInventoryChanges((updateInfo) => {
+                      if (updateInfo.error) {
+                          console.error("Error from inventory listener callback:", updateInfo.error);
+                          return;
+                      }
+                      console.log('Inventory data changed via listener:', updateInfo);
+                      const activePageLi = document.querySelector('.sidebar nav ul li.active');
+                      if (activePageLi && activePageLi.dataset.page === 'inventory') {
+                          console.log('Inventory page is active, reloading inventory list via debounced function...');
+                          if (typeof loadInventory === 'function') {
+                            debouncedLoadInventory();
+                          } else {
+                              console.warn("loadInventory function is not defined, cannot refresh inventory list.");
+                          }
+                      } else {
+                          console.log("Inventory page not active, IndexedDB updated in background.");
+                      }
+                  });
+              } else {
+                  console.warn('inventoryAPI.listenToInventoryChanges is not available to attach listener.');
+              }
+            }).catch(err => {
+                console.error("Failed to initialize IndexedDBManager in app.js, inventory listener not attached:", err);
+            });
+          } else {
+            console.error("indexedDBManagerReady promise not found in app.js. Cannot attach inventory listener.");
+          }
+
+          // Initialize Transaction Listener after ensuring IndexedDB is ready
+          if (window.indexedDBManagerReady) {
+            window.indexedDBManagerReady.then(() => {
+              console.log("IndexedDB is ready, attempting to attach transaction listener.");
+              if (window.transactionAPI && typeof window.transactionAPI.listenToTransactionChanges === 'function') {
+                  const debouncedLoadTransactions = debounce(loadTransactions, 500);
+
+                  window.transactionAPI.listenToTransactionChanges((updateInfo) => {
+                      if (updateInfo.error) {
+                          console.error("Error from transaction listener callback:", updateInfo.error);
+                          return;
+                      }
+                      console.log('Transaction data changed via listener:', updateInfo);
+                      const activePageLi = document.querySelector('.sidebar nav ul li.active');
+                      if (activePageLi && activePageLi.dataset.page === 'transactions') {
+                          console.log('Transaction page is active, reloading transaction list via debounced function...');
+                          if (typeof loadTransactions === 'function') {
+                            debouncedLoadTransactions();
+                          } else {
+                              console.warn("loadTransactions function is not defined, cannot refresh transaction list.");
+                          }
+                      } else {
+                          console.log("Transaction page not active, IndexedDB updated in background.");
+                      }
+                  });
+              } else {
+                  console.warn('transactionAPI.listenToTransactionChanges is not available to attach listener.');
+              }
+            }).catch(err => {
+                console.error("Failed to initialize IndexedDBManager in app.js, transaction listener not attached:", err);
+            });
+          } else {
+            console.error("indexedDBManagerReady promise not found in app.js. Cannot attach transaction listener.");
+          }
+
+          // Initialize Shipment Listener after ensuring IndexedDB is ready
+          if (window.indexedDBManagerReady) {
+            window.indexedDBManagerReady.then(() => {
+              console.log("IndexedDB is ready, attempting to attach shipment listener.");
+              if (window.shipmentAPI && typeof window.shipmentAPI.listenToShipmentChanges === 'function') {
+                  // Assuming a loadShipments function exists or will be created for the shipment page UI
+                  const debouncedLoadShipments = debounce(typeof loadShipments === 'function' ? loadShipments : () => console.warn("loadShipments function not defined but listener triggered."), 500);
+
+                  window.shipmentAPI.listenToShipmentChanges((updateInfo) => {
+                      if (updateInfo.error) {
+                          console.error("Error from shipment listener callback:", updateInfo.error);
+                          return;
+                      }
+                      console.log('Shipment data changed via listener:', updateInfo);
+                      const activePageLi = document.querySelector('.sidebar nav ul li.active');
+                      if (activePageLi && activePageLi.dataset.page === 'shipment') { // Assuming 'shipment' is the data-page value
+                          console.log('Shipment page is active, reloading shipment list via debounced function...');
+                          debouncedLoadShipments();
+                      } else {
+                          console.log("Shipment page not active, IndexedDB updated in background.");
+                      }
+                  });
+              } else {
+                  console.warn('shipmentAPI.listenToShipmentChanges is not available to attach listener.');
+              }
+            }).catch(err => {
+                console.error("Failed to initialize IndexedDBManager in app.js, shipment listener not attached:", err);
+            });
+          } else {
+            console.error("indexedDBManagerReady promise not found in app.js. Cannot attach shipment listener.");
+          }
+
+
           const avatarMenuTrigger = document.getElementById('avatar-menu-trigger');
           const avatarDropdown = document.getElementById('avatar-dropdown');
           
           if (avatarMenuTrigger && avatarDropdown) {
               avatarMenuTrigger.addEventListener('click', function(event) {
-                  event.stopPropagation(); // Prevent click from immediately bubbling to window
+                  event.stopPropagation(); 
                   avatarDropdown.classList.toggle('show');
               });
           }
 
-          // Optional: Close dropdown if clicked outside
           window.addEventListener('click', function(event) {
               const currentAvatarDropdown = document.getElementById('avatar-dropdown'); 
               const currentAvatarMenuTrigger = document.getElementById('avatar-menu-trigger'); 
-              
               if (currentAvatarDropdown && currentAvatarDropdown.classList.contains('show')) {
                   if (currentAvatarMenuTrigger && !currentAvatarMenuTrigger.contains(event.target) && !currentAvatarDropdown.contains(event.target)) {
                       currentAvatarDropdown.classList.remove('show');
@@ -79,41 +217,44 @@ document.addEventListener('DOMContentLoaded', function () {
               }
           });
 
-          // Display logged-in user's name
           const usernameDisplay = document.getElementById('username-display');
           if (usernameDisplay) {
-              usernameDisplay.textContent = displayName; // Use displayName from claims or UID
+              usernameDisplay.textContent = displayName; 
           }
-          // --- END OF APPLICATION INITIALIZATION LOGIC ---
 
       } else {
-          // User is signed out.
           console.log('onAuthStateChanged (app.js): User signed out. Redirecting to login.');
-          if (typeof invalidateProductCache === 'function') {
-              invalidateProductCache();
-          } else {
-              console.warn('invalidateProductCache function not found. Product cache may not be cleared on auth state change to signed out.');
+          // Detach Firestore listeners if they exist
+          if (window.productAPI && typeof window.productAPI.detachProductListener === 'function') {
+              window.productAPI.detachProductListener();
           }
+          if (window.inventoryAPI && typeof window.inventoryAPI.detachInventoryListener === 'function') {
+              window.inventoryAPI.detachInventoryListener();
+          }
+          if (window.transactionAPI && typeof window.transactionAPI.detachTransactionListener === 'function') {
+              window.transactionAPI.detachTransactionListener();
+          }
+          if (window.shipmentAPI && typeof window.shipmentAPI.detachShipmentListener === 'function') {
+              window.shipmentAPI.detachShipmentListener();
+          }
+          // Add similar detach logic for other listeners when implemented
+
+          // Clear any local non-persistent caches if necessary (IndexedDB is persistent)
+          // Example: if (typeof invalidateProductCache === 'function') { invalidateProductCache(); }
+          // This specific one was for session cache, which is removed for products.
+          // If other session caches exist, clear them.
+
           sessionStorage.removeItem('isAuthenticated'); 
           sessionStorage.removeItem('loggedInUser');
           window.location.href = 'login.html';
       }
   });
 
-  // Setup Logout Button (outside onAuthStateChanged so it's always configured if present)
   const dropdownLogoutButton = document.getElementById('dropdown-logout-button');
   if (dropdownLogoutButton) {
       dropdownLogoutButton.addEventListener('click', function(event) {
           event.preventDefault();
-          console.log('Logout button clicked. Signing out...');
-          firebase.auth().signOut().then(() => {
-              if (typeof invalidateProductCache === 'function') {
-                  invalidateProductCache();
-              } else {
-                  console.warn('invalidateProductCache function not found. Product cache may not be cleared on logout.');
-              }
-              console.log('Firebase sign-out successful. onAuthStateChanged will handle redirect.');
-          }).catch(error => {
+          firebase.auth().signOut().catch(error => {
               console.error('Firebase sign-out error:', error);
           });
       });
@@ -126,14 +267,12 @@ function createNavItem(htmlString) {
   return div.firstChild;
 }
 
-// 初始化导航
 function initNavigation() {
   const mainNavList = document.querySelector('.sidebar nav ul');
   const publicWarehouseMenuItem = document.getElementById('public-warehouse-menu');
-  // const publicWarehouseToggle = publicWarehouseMenuItem ? publicWarehouseMenuItem.querySelector('.public-warehouse-toggle') : null; // No longer primary trigger
 
-  if (!mainNavList || !publicWarehouseMenuItem) { // publicWarehouseToggle is not essential for the new logic
-    console.error('Essential navigation elements (mainNavList or publicWarehouseMenuItem) not found.');
+  if (!mainNavList || !publicWarehouseMenuItem) { 
+    console.error('Essential navigation elements not found.');
     return;
   }
 
@@ -142,40 +281,28 @@ function initNavigation() {
   function removeDynamicNavItems() {
     DYNAMIC_NAV_ITEM_IDS.forEach(id => {
       const item = document.getElementById(id);
-      if (item) {
-        item.remove();
-      }
+      if (item) item.remove();
     });
     publicWarehouseMenuItem.classList.remove('expanded');
-    // publicWarehouseMenuItem.classList.remove('active'); // Ensure parent is not active when items are removed
   }
 
-  // Unified click listener for the main navigation list
   mainNavList.addEventListener('click', function(event) {
     const clickedLi = event.target.closest('li');
-    if (!clickedLi) {
-      return; // Click was not inside an <li>
-    }
+    if (!clickedLi) return;
 
     const isPublicWarehouseParentClicked = clickedLi.id === 'public-warehouse-menu';
     const isDynamicSubItemClicked = clickedLi.classList.contains('dynamic-nav-item');
     const pageToLoad = clickedLi.getAttribute('data-page');
 
-    // First, handle activation/deactivation for all items
-    mainNavList.querySelectorAll('li').forEach(li => {
-      li.classList.remove('active');
-    });
+    mainNavList.querySelectorAll('li').forEach(li => li.classList.remove('active'));
 
-    if (isPublicWarehouseParentClicked && !pageToLoad) { // Click on the main "Public Warehouse" <li> itself, and it's not a page link
+    if (isPublicWarehouseParentClicked && !pageToLoad) { 
       event.stopPropagation(); 
       const isCurrentlyExpanded = publicWarehouseMenuItem.classList.contains('expanded');
       if (isCurrentlyExpanded) {
-        removeDynamicNavItems(); // This removes 'expanded'
-        // publicWarehouseMenuItem.classList.remove('active'); // Kept inactive if collapsed
+        removeDynamicNavItems(); 
       } else {
-        publicWarehouseMenuItem.classList.add('expanded');
-        publicWarehouseMenuItem.classList.add('active'); // PW parent is active when expanded
-
+        publicWarehouseMenuItem.classList.add('expanded', 'active');
         const singlongItem = createNavItem(NAV_ITEM_SINGLONG_HTML);
         const lineageItem = createNavItem(NAV_ITEM_LINEAGE_HTML);
         const jordonItem = createNavItem(NAV_ITEM_JORDON_HTML);
@@ -185,375 +312,233 @@ function initNavigation() {
           currentLastItem = item;
         });
       }
-    } else if (pageToLoad) { // Click on an item that loads a page
-      clickedLi.classList.add('active'); // Activate the clicked item
-
+    } else if (pageToLoad) { 
+      clickedLi.classList.add('active'); 
       if (isDynamicSubItemClicked) {
-        // If a sub-item is clicked, ensure the "Public Warehouse" parent is also expanded and active
-        publicWarehouseMenuItem.classList.add('expanded');
-        publicWarehouseMenuItem.classList.add('active');
+        publicWarehouseMenuItem.classList.add('expanded', 'active');
       } else {
-        // If a regular top-level item (not a sub-item of PW) is clicked, collapse PW
-        removeDynamicNavItems(); // This removes 'expanded' from PW
-        // publicWarehouseMenuItem.classList.remove('active'); // Ensure PW is not active (handled by general deactivation above)
+        removeDynamicNavItems(); 
       }
       loadPage(pageToLoad);
     }
-    // If the click was on an LI that doesn't have 'data-page' and isn't the PW parent for toggling, it's handled by general deactivation.
   });
 
-  // Initial state: Ensure no dynamic items are present, PW is not expanded or active.
   removeDynamicNavItems(); 
   publicWarehouseMenuItem.classList.remove('active');
 }
 
-// 加载页面内容
 function loadPage(page) {
   const content = document.getElementById('content');
-  // If page is null or undefined (e.g. clicked on "Public Warehouse" main item which doesn't have data-page)
-  // then do nothing. Content loading is only for items with data-page.
-  if (!page) {
-    return; 
+  if (!content) {
+      console.error("Main content area not found.");
+      return;
   }
+  if (!page) return; 
 
   switch (page) {
-    case 'dashboard':
-      loadDashboard(); // Defined below
-      break;
-    case 'products':
-      loadProducts(); 
-      break;
-    case 'inventory':
-      loadInventory(); 
-      break;
-    case 'transactions':
-      loadTransactions(); 
-      break;
-    case 'inbound':
-      loadInboundForm(); 
-      break;
-    case 'outbound':
-      loadOutboundForm(); 
-      break;
+    case 'dashboard': loadDashboard(); break;
+    case 'products': 
+        if (typeof loadProducts === 'function') loadProducts(); 
+        else console.error("loadProducts function is not defined.");
+        break;
+    case 'inventory': 
+        if (typeof loadInventory === 'function') loadInventory();
+        else console.error("loadInventory function is not defined.");
+        break;
+    case 'transactions': 
+        if (typeof loadTransactions === 'function') loadTransactions();
+        else console.error("loadTransactions function is not defined.");
+        break;
+    case 'inbound': loadInboundForm(); break;
+    case 'outbound': loadOutboundForm(); break;
     case 'shipment':
-      const contentArea = document.getElementById('content');
-      if (contentArea) { // Ensure contentArea exists
         fetch('shipment.html')
-          .then(response => {
-            if (!response.ok) {
-              throw new Error('Network response was not ok for shipment.html: ' + response.statusText);
-            }
-            return response.text();
-          })
+          .then(response => response.ok ? response.text() : Promise.reject(response.statusText))
           .then(html => {
-            contentArea.innerHTML = html;
-            if (typeof initializeShipmentFeature === 'function') {
-              initializeShipmentFeature();
-            } else {
-              console.error('Error: initializeShipmentFeature function not found. Was js/shipment.js loaded correctly?');
-              contentArea.innerHTML = '<p style="color: red;">Error loading shipment page components. Function not found.</p>';
-            }
+            content.innerHTML = html;
+            if (typeof initializeShipmentFeature === 'function') initializeShipmentFeature();
+            else content.innerHTML = '<p style="color: red;">Error: Shipment components failed to load.</p>';
           })
           .catch(error => {
             console.error('Failed to load shipment page:', error);
-            contentArea.innerHTML = `<p style="color: red;">Failed to load shipment page: ${error.message}. Please try again later.</p>`;
+            content.innerHTML = `<p style="color: red;">Failed to load shipment page: ${error}.</p>`;
           });
-      } else {
-        console.error("Error: Main content area ('content') not found.");
-      }
       break;
-    case 'jordon':
-      loadJordonPage(); // New page
-      break;
-    case 'lineage':
-      content.innerHTML = '<h1>Lineage (Coming Soon)</h1>'; // Placeholder
-      break;
-    case 'singlong':
-      content.innerHTML = '<h1>Sing Long (Coming Soon)</h1>'; // Placeholder
-      break;
-    default:
-      loadDashboard();
+    case 'jordon': loadJordonPage(); break;
+    case 'lineage': content.innerHTML = '<h1>Lineage (Coming Soon)</h1>'; break;
+    case 'singlong': content.innerHTML = '<h1>Sing Long (Coming Soon)</h1>'; break;
+    default: loadDashboard();
   }
 }
 
-// Placeholder for Jordon page function
 async function loadJordonPage() {
     const content = document.getElementById('content');
+    if(!content) return;
     try {
-        // Fetch the content of jordon.html
         const response = await fetch('jordon.html');
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const htmlContent = await response.text();
-        
-        // Set the content of the main content area
-        content.innerHTML = htmlContent;
-        
-        setTimeout(() => {
-            if (typeof initJordonTabs === 'function') {
-                initJordonTabs(content); // 'content' is the DOM element where htmlContent was injected
-            } else {
-                console.error('initJordonTabs function not found in app.js when attempting to initialize Jordon page.');
-            }
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        content.innerHTML = await response.text();
+        setTimeout(() => { // Ensure DOM is updated
+            if (typeof initJordonTabs === 'function') initJordonTabs(content);
+            else console.error('initJordonTabs function not found.');
         }, 0);
     } catch (error) {
         console.error('Failed to load Jordon page:', error);
-        content.innerHTML = '<h1>Error loading Jordon page</h1><p>Please try again later.</p>';
+        content.innerHTML = '<h1>Error loading Jordon page</h1>';
     }
 }
 
-// 加载仪表盘
 async function loadDashboard() {
-const content = document.getElementById('content');
-content.innerHTML = `
-  <div class="dashboard">
-      <h1>Welcome to Li Chuan Inventory Management System</h1>
-      <div class="stats">
-          <div class="stat-card">
-              <i class="fas fa-boxes"></i>
-              <div>
-                  <h3>Total Product</h3>
-                  <p id="total-products">0</p>
-              </div>
-          </div>
-          <div class="stat-card">
-              <i class="fas fa-warehouse"></i>
-              <div>
-                  <h3>Total Quantity</h3>
-                  <p id="total-inventory">0</p>
-              </div>
-          </div>
-          <div class="stat-card">
-              <i class="fas fa-exchange-alt"></i>
-              <div>
-                  <h3>Transaction</h3>
-                  <p id="today-transactions">0</p>
-              </div>
+    const content = document.getElementById('content');
+    if(!content) return;
+    content.innerHTML = `
+      <div class="dashboard">
+          <h1>Welcome to Li Chuan Inventory Management System</h1>
+          <div class="stats">
+              <div class="stat-card"><i class="fas fa-boxes"></i><div><h3>Total Product</h3><p id="total-products">0</p></div></div>
+              <div class="stat-card"><i class="fas fa-warehouse"></i><div><h3>Total Quantity</h3><p id="total-inventory">0</p></div></div>
+              <div class="stat-card"><i class="fas fa-exchange-alt"></i><div><h3>Transaction</h3><p id="today-transactions">0</p></div></div>
           </div>
       </div>
-  </div>
-`;
-
-try {
-  if (window.dashboardAPI && typeof window.dashboardAPI.getStats === 'function') {
-    const stats = await window.dashboardAPI.getStats();
-    document.getElementById('total-products').textContent = stats.totalProducts;
-    document.getElementById('total-inventory').textContent = stats.totalInventory;
-    document.getElementById('today-transactions').textContent = stats.todayTransactions;
-  } else {
-    console.warn('dashboardAPI.getStats is not available.');
-    document.getElementById('total-products').textContent = 'N/A';
-    document.getElementById('total-inventory').textContent = 'N/A';
-    document.getElementById('today-transactions').textContent = 'N/A';
-  }
-} catch (error) {
-  console.error('加载仪表盘数据失败:', error);
-  document.getElementById('total-products').textContent = 'Error';
-  document.getElementById('total-inventory').textContent = 'Error';
-  document.getElementById('today-transactions').textContent = 'Error';
-}
+    `;
+    try {
+      if (window.dashboardAPI && typeof window.dashboardAPI.getStats === 'function') {
+        const stats = await window.dashboardAPI.getStats();
+        if(document.getElementById('total-products')) document.getElementById('total-products').textContent = stats.totalProducts;
+        if(document.getElementById('total-inventory')) document.getElementById('total-inventory').textContent = stats.totalInventory;
+        if(document.getElementById('today-transactions')) document.getElementById('today-transactions').textContent = stats.todayTransactions;
+      } else {
+        console.warn('dashboardAPI.getStats is not available.');
+        ['total-products', 'total-inventory', 'today-transactions'].forEach(id => {
+            if(document.getElementById(id)) document.getElementById(id).textContent = 'N/A';
+        });
+      }
+    } catch (error) {
+      console.error('加载仪表盘数据失败:', error);
+      ['total-products', 'total-inventory', 'today-transactions'].forEach(id => {
+        if(document.getElementById(id)) document.getElementById(id).textContent = 'Error';
+      });
+    }
 }
 
-// 入库表单
 function loadInboundForm() {
-const content = document.getElementById('content');
-content.innerHTML = `
-  <div class="form-container">
-      <h1>Inbound</h1>
-      <form id="inbound-form">
-          <div class="form-group">
-              <label for="inbound-productCode">Item Code*</label>
-              <input type="text" id="inbound-productCode" name="productCode" required>
-          </div>
-          <div class="form-group">
-              <label for="inbound-warehouseId">Warehouse ID*</label>
-              <input type="text" id="inbound-warehouseId" name="warehouseId" value="WH01" required>
-          </div>
-          <div class="form-row">
-              <div class="form-group">
-                  <label for="inbound-batchNo">Batch No</label>
-                  <input type="text" id="inbound-batchNo" name="batchNo">
+    const content = document.getElementById('content');
+    if(!content) return;
+    content.innerHTML = `
+      <div class="form-container">
+          <h1>Inbound</h1>
+          <form id="inbound-form">
+              <div class="form-group"><label for="inbound-productCode">Item Code*</label><input type="text" id="inbound-productCode" name="productCode" required></div>
+              <div class="form-group"><label for="inbound-warehouseId">Warehouse ID*</label><input type="text" id="inbound-warehouseId" name="warehouseId" value="WH01" required></div>
+              <div class="form-row">
+                  <div class="form-group"><label for="inbound-batchNo">Batch No</label><input type="text" id="inbound-batchNo" name="batchNo"></div>
+                  <div class="form-group"><label for="inbound-expiryDate">Exp Date</label><input type="date" id="inbound-expiryDate" name="expiryDate"></div>
               </div>
-              <div class="form-group">
-                  <label for="inbound-expiryDate">Exp Date</label>
-                  <input type="date" id="inbound-expiryDate" name="expiryDate">
-              </div>
-          </div>
-          <div class="form-group">
-              <label for="inbound-quantity">Quantity*</label>
-              <input type="number" id="inbound-quantity" name="quantity" min="1" required>
-          </div>
-          <div class="form-group">
-              <label for="inbound-operatorId">User ID*</label>
-              <input type="text" id="inbound-operatorId" name="operatorId" required>
-          </div>
-          <div class="form-actions">
-              <button type="button" class="btn btn-secondary" id="inbound-cancel-btn">Cancel</button>
-              <button type="submit" class="btn btn-primary">Submit</button>
-          </div>
-      </form>
-  </div>
-`;
-
-document.getElementById('inbound-cancel-btn').addEventListener('click', () => loadPage('inventory'));
-document.getElementById('inbound-form').addEventListener('submit', handleInboundSubmit);
+              <div class="form-group"><label for="inbound-quantity">Quantity*</label><input type="number" id="inbound-quantity" name="quantity" min="1" required></div>
+              <div class="form-group"><label for="inbound-operatorId">User ID*</label><input type="text" id="inbound-operatorId" name="operatorId" required></div>
+              <div class="form-actions"><button type="button" class="btn btn-secondary" id="inbound-cancel-btn">Cancel</button><button type="submit" class="btn btn-primary">Submit</button></div>
+          </form>
+      </div>
+    `;
+    const cancelBtn = document.getElementById('inbound-cancel-btn');
+    if(cancelBtn) cancelBtn.addEventListener('click', () => loadPage('inventory'));
+    const inboundForm = document.getElementById('inbound-form');
+    if(inboundForm) inboundForm.addEventListener('submit', handleInboundSubmit);
 }
 
 async function handleInboundSubmit(e) {
-e.preventDefault();
-const form = e.target;
-const formData = new FormData(form);
-const rawData = Object.fromEntries(formData.entries());
+    e.preventDefault();
+    const form = e.target;
+    const rawData = Object.fromEntries(new FormData(form).entries());
+    const submitButton = form.querySelector('button[type="submit"]');
+    if(submitButton) { submitButton.disabled = true; submitButton.textContent = 'Submitting...';}
 
-const submitButton = form.querySelector('button[type="submit"]');
-submitButton.disabled = true;
-submitButton.textContent = 'Submitting...';
-
-try {
-  if (!window.productAPI || typeof window.productAPI.getProductByCode !== 'function') {
-      alert('Product API is not available. Cannot validate product.');
-      submitButton.disabled = false; submitButton.textContent = 'Submit'; return;
-  }
-  const product = await window.productAPI.getProductByCode(rawData.productCode);
-  if (!product) {
-    alert(`Product with code "${rawData.productCode}" not found. Please check the code or add the product first.`);
-    submitButton.disabled = false; submitButton.textContent = 'Submit'; return;
-  }
-
-  const inboundData = {
-    productId: product.id,
-    productCode: product.productCode,
-    productName: product.name,
-    warehouseId: rawData.warehouseId,
-    batchNo: rawData.batchNo,
-    expiryDate: rawData.expiryDate || null,
-    quantity: Number(rawData.quantity),
-    operatorId: rawData.operatorId,
-  };
-  
-  if (!window.transactionAPI || typeof window.transactionAPI.inboundStock !== 'function') {
-      alert('Transaction API is not available. Cannot submit inbound stock.');
-      submitButton.disabled = false; submitButton.textContent = 'Submit'; return;
-  }
-  await window.transactionAPI.inboundStock(inboundData);
-  alert('Inbound successful!');
-  loadPage('inventory');
-} catch (error) {
-  console.error('Inbound failed:', error);
-  alert('Inbound failed: ' + error.message);
-} finally {
-  if (submitButton) {
-    submitButton.disabled = false;
-    submitButton.textContent = 'Submit';
-  }
-}
+    try {
+      if (!window.productAPI || !window.transactionAPI) throw new Error("API not available.");
+      const product = await window.productAPI.getProductByCode(rawData.productCode);
+      if (!product) throw new Error(`Product with code "${rawData.productCode}" not found.`);
+      
+      await window.transactionAPI.inboundStock({
+        productId: product.id, productCode: product.productCode, productName: product.name,
+        warehouseId: rawData.warehouseId, batchNo: rawData.batchNo, 
+        expiryDate: rawData.expiryDate || null, quantity: Number(rawData.quantity),
+        operatorId: rawData.operatorId,
+      });
+      alert('Inbound successful!');
+      loadPage('inventory');
+    } catch (error) {
+      console.error('Inbound failed:', error);
+      alert('Inbound failed: ' + error.message);
+    } finally {
+      if(submitButton) { submitButton.disabled = false; submitButton.textContent = 'Submit';}
+    }
 }
 
-// 出库表单
 function loadOutboundForm() {
-const content = document.getElementById('content');
-content.innerHTML = `
-  <div class="form-container">
-      <h1>Out Bound</h1>
-      <form id="outbound-form">
-          <div class="form-group">
-              <label for="outbound-productCode">Item Code*</label>
-              <input type="text" id="outbound-productCode" name="productCode" required>
-          </div>
-          <div class="form-group">
-              <label for="outbound-warehouseId">Warehouse ID*</label>
-              <input type="text" id="outbound-warehouseId" name="warehouseId" value="WH01" required>
-          </div>
-          <div class="form-group">
-              <label for="outbound-batchNo">Batch No</label>
-              <input type="text" id="outbound-batchNo" name="batchNo">
-          </div>
-          <div class="form-group">
-              <label for="outbound-quantity">Quantity*</label>
-              <input type="number" id="outbound-quantity" name="quantity" min="1" required>
-          </div>
-          <div class="form-group">
-              <label for="outbound-operatorId">User ID*</label>
-              <input type="text" id="outbound-operatorId" name="operatorId" required>
-          </div>
-          <div class="form-actions">
-              <button type="button" class="btn btn-secondary" id="outbound-cancel-btn">Cancel</button>
-              <button type="submit" class="btn btn-primary">Submit</button>
-          </div>
-      </form>
-  </div>
-`;
-
-document.getElementById('outbound-cancel-btn').addEventListener('click', () => loadPage('inventory'));
-document.getElementById('outbound-form').addEventListener('submit', handleOutboundSubmit);
+    const content = document.getElementById('content');
+    if(!content) return;
+    content.innerHTML = `
+      <div class="form-container">
+          <h1>Out Bound</h1>
+          <form id="outbound-form">
+              <div class="form-group"><label for="outbound-productCode">Item Code*</label><input type="text" id="outbound-productCode" name="productCode" required></div>
+              <div class="form-group"><label for="outbound-warehouseId">Warehouse ID*</label><input type="text" id="outbound-warehouseId" name="warehouseId" value="WH01" required></div>
+              <div class="form-group"><label for="outbound-batchNo">Batch No</label><input type="text" id="outbound-batchNo" name="batchNo"></div>
+              <div class="form-group"><label for="outbound-quantity">Quantity*</label><input type="number" id="outbound-quantity" name="quantity" min="1" required></div>
+              <div class="form-group"><label for="outbound-operatorId">User ID*</label><input type="text" id="outbound-operatorId" name="operatorId" required></div>
+              <div class="form-actions"><button type="button" class="btn btn-secondary" id="outbound-cancel-btn">Cancel</button><button type="submit" class="btn btn-primary">Submit</button></div>
+          </form>
+      </div>
+    `;
+    const cancelBtn = document.getElementById('outbound-cancel-btn');
+    if(cancelBtn) cancelBtn.addEventListener('click', () => loadPage('inventory'));
+    const outboundForm = document.getElementById('outbound-form');
+    if(outboundForm) outboundForm.addEventListener('submit', handleOutboundSubmit);
 }
 
 async function handleOutboundSubmit(e) {
-e.preventDefault();
-const form = e.target;
-const formData = new FormData(form);
-const rawData = Object.fromEntries(formData.entries());
+    e.preventDefault();
+    const form = e.target;
+    const rawData = Object.fromEntries(new FormData(form).entries());
+    const submitButton = form.querySelector('button[type="submit"]');
+    if(submitButton) { submitButton.disabled = true; submitButton.textContent = 'Submitting...'; }
 
-const submitButton = form.querySelector('button[type="submit"]');
-submitButton.disabled = true;
-submitButton.textContent = 'Submitting...';
+    try {
+      if (!window.productAPI || !window.transactionAPI) throw new Error("API not available.");
+      const product = await window.productAPI.getProductByCode(rawData.productCode); // Corrected typo from getProductBy_Code
+      if (!product) throw new Error(`Product with code "${rawData.productCode}" not found.`);
 
-try {
-  if (!window.productAPI || typeof window.productAPI.getProductByCode !== 'function') {
-      alert('Product API is not available. Cannot validate product.');
-      submitButton.disabled = false; submitButton.textContent = 'Submit'; return;
-  }
-  const product = await window.productAPI.getProductBy_Code(rawData.productCode); // Typo corrected: getProductBy_Code -> getProductByCode
-  if (!product) {
-    alert(`Product with code "${rawData.productCode}" not found.`);
-    submitButton.disabled = false; submitButton.textContent = 'Submit'; return;
-  }
-
-  const outboundData = {
-    productId: product.id,
-    productCode: product.productCode,
-    productName: product.name,
-    warehouseId: rawData.warehouseId,
-    batchNo: rawData.batchNo,
-    quantity: Number(rawData.quantity),
-    operatorId: rawData.operatorId,
-  };
-
-  if (!window.transactionAPI || typeof window.transactionAPI.outboundStock !== 'function') {
-      alert('Transaction API is not available. Cannot submit outbound stock.');
-      submitButton.disabled = false; submitButton.textContent = 'Submit'; return;
-  }
-  await window.transactionAPI.outboundStock(outboundData);
-  alert('Outbound successful!');
-  loadPage('inventory');
-} catch (error) {
-  console.error('Outbound failed:', error);
-  alert('Outbound failed: ' + error.message);
-} finally {
-  if (submitButton) {
-    submitButton.disabled = false;
-    submitButton.textContent = 'Submit';
-  }
-}
+      await window.transactionAPI.outboundStock({
+        productId: product.id, productCode: product.productCode, productName: product.name,
+        warehouseId: rawData.warehouseId, batchNo: rawData.batchNo, 
+        quantity: Number(rawData.quantity), operatorId: rawData.operatorId,
+      });
+      alert('Outbound successful!');
+      loadPage('inventory');
+    } catch (error) {
+      console.error('Outbound failed:', error);
+      alert('Outbound failed: ' + error.message);
+    } finally {
+      if(submitButton) { submitButton.disabled = false; submitButton.textContent = 'Submit';}
+    }
 }
 
-// Placeholder for functions that might not be defined yet
+// Fallbacks for potentially undefined load functions (should be defined in their respective JS files)
 if (typeof loadProducts === 'undefined') {
-window.loadProducts = function() {
-  document.getElementById('content').innerHTML = '<h1>Products (Not Implemented)</h1>';
-  console.warn('loadProducts function was not defined. Using placeholder.');
-}
+  window.loadProducts = function() { 
+    const c = document.getElementById('content'); if(c) c.innerHTML = '<h1>Products (Load Function Missing)</h1>'; 
+    console.warn('loadProducts definition missing.'); 
+  }
 }
 if (typeof loadInventory === 'undefined') {
-window.loadInventory = function() {
-  document.getElementById('content').innerHTML = '<h1>Inventory (Not Implemented)</h1>';
-  console.warn('loadInventory function was not defined. Using placeholder.');
-}
+  window.loadInventory = function() { 
+    const c = document.getElementById('content'); if(c) c.innerHTML = '<h1>Inventory (Load Function Missing)</h1>';
+    console.warn('loadInventory definition missing.'); 
+  }
 }
 if (typeof loadTransactions === 'undefined') {
-window.loadTransactions = function () {
-  console.warn('loadTransactions function is not defined yet.');
-  document.getElementById('content').innerHTML = '<h1>Transactions (Not Implemented)</h1>';
-};
+  window.loadTransactions = function () { 
+    const c = document.getElementById('content'); if(c) c.innerHTML = '<h1>Transactions (Load Function Missing)</h1>';
+    console.warn('loadTransactions definition missing.'); 
+  };
 }
