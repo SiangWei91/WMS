@@ -1,6 +1,7 @@
 // 交易记录逻辑
 let transactionsCurrentPage = 1;
 const transactionsRowsPerPage = 10;
+let currentTransactionFilters = {}; // Store current filters
 
 async function loadTransactions() {
     const content = document.getElementById('content');
@@ -26,7 +27,7 @@ async function loadTransactions() {
                         <label for="end-date">End Date:</label>
                         <input type="date" id="end-date">
                     </div>
-                    <button id="apply-filters" class="btn btn-primary">Apply Filters</button>
+                    <button id="apply-filters-btn" class="btn btn-primary">Apply Filters</button>
                 </div>
             </div>
             <div class="table-container">
@@ -54,37 +55,49 @@ async function loadTransactions() {
     `;
 
     // 添加事件监听器
-    document.getElementById('apply-filters').addEventListener('click', applyTransactionFilters);
-
-    // 加载交易数据
+    const applyFiltersButton = document.getElementById('apply-filters-btn');
+    if (applyFiltersButton) {
+        applyFiltersButton.addEventListener('click', () => applyTransactionFilters(true));
+    }
+    
+    // Load initial data with no filters
+    currentTransactionFilters = {}; // Reset filters
+    transactionsCurrentPage = 1; // Reset page
     await fetchTransactions();
 }
 
-async function fetchTransactions(filters = {}) {
+async function fetchTransactions() {
     try {
         const params = {
             page: transactionsCurrentPage,
             limit: transactionsRowsPerPage,
-            ...filters
+            ...currentTransactionFilters // Use stored filters
         };
         
+        if (!window.transactionAPI || typeof window.transactionAPI.getTransactions !== 'function') {
+            throw new Error("transactionAPI.getTransactions is not available.");
+        }
         const response = await transactionAPI.getTransactions(params);
         renderTransactionsTable(response.data);
         renderTransactionsPagination(response.pagination);
     } catch (error) {
         console.error('获取交易记录失败:', error);
-        alert('获取交易记录失败: ' + error.message);
+        const tbody = document.getElementById('transactions-table-body');
+        if(tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">获取交易记录失败: ${error.message}</td></tr>`;
+        const paginationDiv = document.getElementById('transactions-pagination');
+        if(paginationDiv) paginationDiv.innerHTML = ''; // Clear pagination on error
     }
 }
 
 function renderTransactionsTable(transactions) {
     const tbody = document.getElementById('transactions-table-body');
+    if (!tbody) return;
     tbody.innerHTML = '';
 
-    if (transactions.length === 0) {
+    if (!transactions || transactions.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" class="no-data">没有找到交易记录</td>
+                <td colspan="7" class="no-data text-center">没有找到交易记录</td>
             </tr>
         `;
         return;
@@ -99,11 +112,11 @@ function renderTransactionsTable(transactions) {
                     ${getTransactionTypeText(tx.type)}
                 </span>
             </td>
-            <td>${tx.productCode}</td>
+            <td>${tx.productCode || '-'}</td>
             <td>${tx.productName || '-'}</td>
-            <td>${tx.warehouseId}</td>
-            <td class="${tx.type === 'inbound' ? 'text-success' : 'text-danger'}">
-                ${tx.type === 'inbound' ? '+' : '-'}${tx.quantity}
+            <td>${tx.warehouseId || '-'}</td>
+            <td class="${(tx.type === 'inbound' || tx.type === 'initial') ? 'text-success' : 'text-danger'}">
+                ${(tx.type === 'inbound' || tx.type === 'initial') ? '+' : '-'}${tx.quantity}
             </td>
             <td>${tx.operatorId || '系统'}</td>
         `;
@@ -113,27 +126,37 @@ function renderTransactionsTable(transactions) {
 
 function renderTransactionsPagination(pagination) {
     const paginationDiv = document.getElementById('transactions-pagination');
+    if (!paginationDiv) return;
     paginationDiv.innerHTML = '';
 
-    const { page, totalPages } = pagination;
+    // Ensure pagination and pagination.totalPages are defined
+    if (!pagination || typeof pagination.totalPages === 'undefined' || typeof pagination.currentPage === 'undefined') {
+        console.warn("Pagination data is incomplete.", pagination);
+        return; 
+    }
+
+    const currentPage = pagination.currentPage;
+    const totalPages = pagination.totalPages;
+
+    if (totalPages <= 1) return; // No pagination needed for single page or no results
 
     // 上一页按钮
     const prevBtn = document.createElement('button');
     prevBtn.className = 'btn-pagination';
-    prevBtn.disabled = page === 1;
+    prevBtn.disabled = currentPage === 1;
     prevBtn.innerHTML = '<i class="fas fa-chevron-left"></i>';
     prevBtn.addEventListener('click', () => {
-        if (page > 1) {
-            transactionsCurrentPage = page - 1;
-            fetchTransactions();
+        if (currentPage > 1) {
+            transactionsCurrentPage = currentPage - 1;
+            fetchTransactions(); // Filters are already stored in currentTransactionFilters
         }
     });
     paginationDiv.appendChild(prevBtn);
 
-    // 页码按钮
+    // 页码按钮 (simplified for brevity, could add more complex logic for many pages)
     for (let i = 1; i <= totalPages; i++) {
         const pageBtn = document.createElement('button');
-        pageBtn.className = `btn-pagination ${i === page ? 'active' : ''}`;
+        pageBtn.className = `btn-pagination ${i === currentPage ? 'active' : ''}`;
         pageBtn.textContent = i;
         pageBtn.addEventListener('click', () => {
             transactionsCurrentPage = i;
@@ -145,29 +168,31 @@ function renderTransactionsPagination(pagination) {
     // 下一页按钮
     const nextBtn = document.createElement('button');
     nextBtn.className = 'btn-pagination';
-    nextBtn.disabled = page === totalPages;
+    nextBtn.disabled = currentPage === totalPages || !pagination.hasNextPage;
     nextBtn.innerHTML = '<i class="fas fa-chevron-right"></i>';
     nextBtn.addEventListener('click', () => {
-        if (page < totalPages) {
-            transactionsCurrentPage = page + 1;
+        if (currentPage < totalPages && pagination.hasNextPage) {
+            transactionsCurrentPage = currentPage + 1;
             fetchTransactions();
         }
     });
     paginationDiv.appendChild(nextBtn);
 }
 
-function applyTransactionFilters() {
-    const type = document.getElementById('transaction-type').value;
-    const startDate = document.getElementById('start-date').value;
-    const endDate = document.getElementById('end-date').value;
+function applyTransactionFilters(resetPage = true) {
+    const typeInput = document.getElementById('transaction-type');
+    const startDateInput = document.getElementById('start-date');
+    const endDateInput = document.getElementById('end-date');
+
+    currentTransactionFilters = {}; // Reset before applying new ones
+    if (typeInput && typeInput.value) currentTransactionFilters.type = typeInput.value;
+    if (startDateInput && startDateInput.value) currentTransactionFilters.startDate = startDateInput.value;
+    if (endDateInput && endDateInput.value) currentTransactionFilters.endDate = endDateInput.value;
     
-    const filters = {};
-    if (type) filters.type = type;
-    if (startDate) filters.startDate = startDate;
-    if (endDate) filters.endDate = endDate;
-    
-    transactionsCurrentPage = 1;
-    fetchTransactions(filters);
+    if (resetPage) {
+        transactionsCurrentPage = 1;
+    }
+    fetchTransactions();
 }
 
 function getTransactionTypeText(type) {
@@ -190,7 +215,17 @@ function getTransactionBadgeClass(type) {
 
 function formatDate(timestamp) {
     if (!timestamp) return '-';
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    let date;
+    // Check if timestamp is a Firestore Timestamp object or an ISO string/number
+    if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+        date = timestamp.toDate();
+    } else {
+        date = new Date(timestamp); // Handles ISO strings and numbers
+    }
+
+    if (isNaN(date.getTime())) { // Check if date is valid
+        return 'Invalid Date';
+    }
 
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
