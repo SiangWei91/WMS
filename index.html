@@ -121,8 +121,11 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
     <!-- Your Firebase Init Script -->
     <script src="js/firebase-init.js"></script>
-    <!-- 加载所有JavaScript文件 -->
+    <!-- IndexedDB Manager FIRST -->
+    <script src="js/indexeddb-manager.js"></script>
+    <!-- API that depends on IndexedDB Manager -->
     <script src="js/api.js"></script>
+    <!-- Other scripts that might depend on API or IndexedDB Manager -->
     <script src="js/products.js"></script>
     <script src="js/inventory.js"></script>
     <script src="js/transactions.js"></script>
