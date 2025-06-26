@@ -347,9 +347,11 @@ const productAPI_indexedDB = {
 
             productsListenerUnsubscribe = window.db.collection('products')
                 .onSnapshot(async (querySnapshot) => {
-                    console.log("Product listener detected changes from Firestore.");
-                    await ensureDbManager(); // Re-ensure within async callback, though likely already ready
+                    await ensureDbManager(); 
                     const changes = querySnapshot.docChanges();
+                    if (changes.length > 0) {
+                        console.log(`Product listener: Processing ${changes.length} change(s) from Firestore.`);
+                    }
                     for (const change of changes) {
                         let productData = { id: change.doc.id, ...change.doc.data() };
                         
@@ -360,20 +362,16 @@ const productAPI_indexedDB = {
                             productData.updatedAt = productData.updatedAt.toDate().toISOString();
                         }
 
-                        if (change.type === "added") {
-                            console.log("Product added via listener:", productData.id);
-                            await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productData);
-                        }
-                        if (change.type === "modified") {
-                            console.log("Product modified via listener:", productData.id);
+                        if (change.type === "added" || change.type === "modified") {
+                            // console.log(`Product ${change.type} via listener: ${productData.id}`); // Keep if one example is desired
                             await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productData);
                         }
                         if (change.type === "removed") {
-                            console.log("Product removed via listener:", productData.id);
+                            // console.log(`Product removed via listener: ${productData.id}`);
                             await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productData.id);
                         }
                     }
-                    if (callback && typeof callback === 'function') {
+                    if (changes.length > 0 && callback && typeof callback === 'function') {
                         callback({ type: 'products_updated', count: changes.length });
                     }
                 }, (error) => {
@@ -420,29 +418,29 @@ const productAPI_indexedDB = {
 
             inventoryListenerUnsubscribe = window.db.collection('inventory_aggregated')
                 .onSnapshot(async (querySnapshot) => {
-                    console.log("Inventory listener detected changes from Firestore inventory_aggregated.");
-                    await ensureDbManager(); // Re-ensure
+                    await ensureDbManager(); 
                     const changes = querySnapshot.docChanges();
+                    if (changes.length > 0) {
+                        console.log(`Inventory listener: Processing ${changes.length} change(s) from Firestore inventory_aggregated.`);
+                    }
                     for (const change of changes) {
                         let invItemData = { productCode: change.doc.id, ...change.doc.data() };
                         
                         if (invItemData.lastUpdated && invItemData.lastUpdated.toDate) {
                             invItemData.lastUpdated = invItemData.lastUpdated.toDate().toISOString();
                         }
-                        // Ensure productCode is part of the object for IDB keyPath
                         if (!invItemData.productCode) invItemData.productCode = change.doc.id;
 
-
                         if (change.type === "added" || change.type === "modified") {
-                            console.log(`Inventory item ${change.type} via listener:`, invItemData.productCode);
+                            // console.log(`Inventory item ${change.type} via listener: ${invItemData.productCode}`);
                             await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.INVENTORY, invItemData);
                         }
                         if (change.type === "removed") {
-                            console.log("Inventory item removed via listener:", invItemData.productCode);
+                            // console.log(`Inventory item removed via listener: ${invItemData.productCode}`);
                             await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.INVENTORY, invItemData.productCode);
                         }
                     }
-                    if (callback && typeof callback === 'function') {
+                    if (changes.length > 0 && callback && typeof callback === 'function') {
                         callback({ type: 'inventory_updated', count: changes.length });
                     }
                 }, (error) => {
@@ -864,28 +862,30 @@ window.transactionAPI = {
             transactionListenerUnsubscribe = window.db.collection('transactions')
                 .orderBy('transactionDate', 'desc') // Listen to new transactions primarily
                 .onSnapshot(async (querySnapshot) => {
-                    console.log("Transaction listener detected changes from Firestore.");
-                    await ensureDbManager(); // Re-ensure for safety in async callback
+                    await ensureDbManager(); 
                     const changes = querySnapshot.docChanges();
-                    let newOrModifiedCount = 0;
+                    let changedCount = 0;
+                    if (changes.length > 0) {
+                        console.log(`Transaction listener: Processing ${changes.length} change(s) from Firestore.`);
+                    }
                     for (const change of changes) {
                         let txData = { id: change.doc.id, ...change.doc.data() };
                         if (txData.transactionDate && txData.transactionDate.toDate) {
                             txData.transactionDate = txData.transactionDate.toDate().toISOString();
                         }
-                        // For 'added' or 'modified', update/add to IndexedDB
                         if (change.type === "added" || change.type === "modified") {
+                            // console.log(`Transaction ${change.type} via listener: ${txData.id}`);
                             await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, txData);
-                            newOrModifiedCount++;
+                            changedCount++;
                         }
-                        // For 'removed', remove from IndexedDB
                         if (change.type === "removed") {
+                            // console.log(`Transaction removed via listener: ${txData.id}`);
                             await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, txData.id);
-                            newOrModifiedCount++; // Treat removal as a change for UI update purposes
+                            changedCount++; 
                         }
                     }
-                    if (newOrModifiedCount > 0 && typeof callback === 'function') {
-                        callback({ type: 'transactions_updated', count: newOrModifiedCount });
+                    if (changedCount > 0 && typeof callback === 'function') {
+                        callback({ type: 'transactions_updated', count: changedCount });
                     }
                 }, (error) => {
                     console.error("Error in transaction listener: ", error);
@@ -1142,10 +1142,12 @@ window.shipmentAPI = {
             shipmentListenerUnsubscribe = window.db.collection('shipments')
                 .orderBy('createdAt', 'desc') // Example: listen based on creation or shipmentDate
                 .onSnapshot(async (querySnapshot) => {
-                    console.log("Shipment listener detected changes from Firestore.");
                     await ensureDbManager(); 
                     const changes = querySnapshot.docChanges();
                     let changedCount = 0;
+                    if (changes.length > 0) {
+                        console.log(`Shipment listener: Processing ${changes.length} change(s) from Firestore.`);
+                    }
                     for (const change of changes) {
                         let shipmentData = { id: change.doc.id, ...change.doc.data() };
                         if (shipmentData.createdAt && shipmentData.createdAt.toDate) {
@@ -1157,10 +1159,12 @@ window.shipmentAPI = {
                         // Add other timestamp conversions (e.g., updatedAt)
 
                         if (change.type === "added" || change.type === "modified") {
+                            // console.log(`Shipment ${change.type} via listener: ${shipmentData.id}`);
                             await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.SHIPMENTS, shipmentData);
                             changedCount++;
                         }
                         if (change.type === "removed") {
+                            // console.log(`Shipment removed via listener: ${shipmentData.id}`);
                             await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.SHIPMENTS, shipmentData.id);
                             changedCount++;
                         }
