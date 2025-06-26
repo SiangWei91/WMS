@@ -285,7 +285,7 @@ async function syncOfflineQueue() {
         return;
     }
     if (!window.indexedDBManager) {
-        console.warn("IndexedDBManager not available. Sync deferred.");
+        // console.warn("IndexedDBManager not available. Sync deferred."); // Already logged by ensureDbManager if called
         return;
     }
 
@@ -295,179 +295,105 @@ async function syncOfflineQueue() {
     try {
         pendingOperations = await window.indexedDBManager.getAllItems(queueStoreName);
     } catch (error) {
-        console.error("Error fetching items from offline queue:", error);
+        console.error("Sync: Error fetching items from offline queue:", error);
         return;
     }
 
     if (!pendingOperations || pendingOperations.length === 0) {
-        console.log("Offline queue is empty. Nothing to sync.");
+        console.log("Sync: Offline queue is empty.");
         return;
     }
 
-    console.log(`Found ${pendingOperations.length} items in the offline queue.`);
+    console.log(`Sync: Found ${pendingOperations.length} item(s) in the offline queue.`);
 
-    for (const op of pendingOperations.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))) { // Process in order
+    for (const op of pendingOperations.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))) {
+        let success = false;
+        console.log(`Sync: Processing op ID ${op.id} - ${op.operation} on ${op.storeName}`);
         try {
-            let success = false;
             if (op.storeName === window.indexedDBManager.STORE_NAMES.PRODUCTS) {
                 const productPayload = op.payload;
                 const itemId = op.itemId || (productPayload ? productPayload.id : null);
 
                 if (op.operation === 'add') {
-                    // For 'add', the payload contains a temporary local ID.
-                    // We need to add to Firestore, get the new Firestore ID,
-                    // then update the original item in IndexedDB products store with the Firestore ID,
-                    // and remove the 'pendingSync' flag.
-                    console.log("Syncing ADD operation for product:", productPayload);
                     const firestoreData = { ...productPayload };
-                    delete firestoreData.id; // Remove local temp ID
-                    delete firestoreData.pendingSync; // Don't store this in Firestore
-                    // Ensure createdAt is a server timestamp if it was set locally
+                    delete firestoreData.id; delete firestoreData.pendingSync;
                     if (firestoreData.createdAt) firestoreData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-                    if (firestoreData.updatedAt) delete firestoreData.updatedAt; // Firestore handles this on creation
-
-
-                    const docRef = await window.db.collection('products').add(firestoreData);
+                    if (firestoreData.updatedAt) delete firestoreData.updatedAt;
                     
-                    // Update the item in IndexedDB 'products' store with the new Firestore ID
+                    const docRef = await window.db.collection('products').add(firestoreData);
                     const originalLocalItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productPayload.id);
                     if (originalLocalItem) {
-                        await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productPayload.id); // Delete old item with local ID
-                        originalLocalItem.id = docRef.id; // Update with Firestore ID
-                        originalLocalItem.pendingSync = false;
-                        // Server timestamp will be slightly different, listener should handle consistency if needed.
-                        // Or fetch the doc from Firestore and update IDB again. For now, this is simpler.
+                        await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productPayload.id);
+                        originalLocalItem.id = docRef.id; originalLocalItem.pendingSync = false;
                         await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, originalLocalItem);
-                         console.log(`Synced ADD: Local product ${productPayload.id} updated to Firestore ID ${docRef.id}`);
                     } else {
-                        // If original item is gone, just ensure the new one is there (listener might have added it)
-                         const newItemWithFirestoreId = { ...firestoreData, id: docRef.id, createdAt: new Date().toISOString()}; // Reconstruct for IDB
+                         const newItemWithFirestoreId = { ...firestoreData, id: docRef.id, createdAt: new Date().toISOString()};
                          await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, newItemWithFirestoreId);
-                         console.log(`Synced ADD: Product ${docRef.id} ensured in IndexedDB.`);
                     }
                     success = true;
-
+                    console.log(`Sync: Product ADD success - local ${productPayload.id} to FS ID ${docRef.id}`);
                 } else if (op.operation === 'update' && itemId) {
-                    console.log("Syncing UPDATE operation for product ID:", itemId, "Payload:", productPayload);
                     const firestoreUpdateData = { ...productPayload };
-                    delete firestoreUpdateData.id; // Don't include ID in update payload
-                    delete firestoreUpdateData.pendingSync;
-                     // Ensure updatedAt is a server timestamp
+                    delete firestoreUpdateData.id; delete firestoreUpdateData.pendingSync;
                     firestoreUpdateData.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
-                    if(firestoreUpdateData.createdAt && typeof firestoreUpdateData.createdAt === 'string'){
-                        // Assuming createdAt was an ISO string from IDB, Firestore expects Timestamp or to remove it if not changing
-                        // For simplicity, if it's there, let it be, or convert. Or remove if it shouldn't be updated.
-                        // Let's assume it's fine or handled by Firestore's merge behavior.
-                    }
-
                     await window.db.collection('products').doc(itemId).update(firestoreUpdateData);
-                    
-                    // Update pendingSync flag in IndexedDB 'products' store
                     const productInDb = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, itemId);
                     if (productInDb) {
                         productInDb.pendingSync = false;
-                        // Firestore's server timestamp for updatedAt will be different.
-                        // The listener should ideally catch this and update IDB.
-                        // Or, fetch from Firestore after update to get the exact server state.
-                        // For now, just mark as synced.
                         await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productInDb);
                     }
                     success = true;
-                    console.log("Synced UPDATE for product ID:", itemId);
-
+                    console.log(`Sync: Product UPDATE success for ID ${itemId}`);
                 } else if (op.operation === 'delete' && itemId) {
-                    console.log("Syncing DELETE operation for product ID:", itemId);
                     await window.db.collection('products').doc(itemId).delete();
-                    // Item is already deleted from IndexedDB 'products' store.
                     success = true;
-                    console.log("Synced DELETE for product ID:", itemId);
+                    console.log(`Sync: Product DELETE success for ID ${itemId}`);
                 }
             } else if (op.storeName === 'transactions' && (op.operation === 'inbound' || op.operation === 'outbound')) {
-                // Sync inbound/outbound transactions
-                // These call the main transactionAPI functions which write to Firestore 'transactions'
-                // The Cloud Function then updates 'inventory_aggregated', and the listener updates IDB.
-                // So, we just need to ensure the transactionAPI call succeeds.
-                console.log(`Syncing ${op.operation} transaction:`, op.payload);
-                if (op.operation === 'inbound' && window.transactionAPI && typeof window.transactionAPI.inboundStock === 'function') {
-                    // The payload already contains all necessary data for inboundStock.
-                    // We need to remove the temporary client-side 'id' and 'pendingSync' before sending to API if they exist.
-                    const firestorePayload = { ...op.payload };
-                    delete firestorePayload.id;
-                    delete firestorePayload.pendingSync;
-                    delete firestorePayload.transactionDate; // Let server set it.
-
-                    await window.transactionAPI.inboundStock(firestorePayload); // Call the original API method
-                    success = true;
-                    console.log(`Synced INBOUND transaction for productCode: ${op.payload.productCode}`);
-                } else if (op.operation === 'outbound' && window.transactionAPI && typeof window.transactionAPI.outboundStock === 'function') {
-                    const firestorePayload = { ...op.payload };
-                    delete firestorePayload.id;
-                    delete firestorePayload.pendingSync;
-                    delete firestorePayload.transactionDate;
-
-                    await window.transactionAPI.outboundStock(firestorePayload); // Call the original API method
-                    success = true;
-                    console.log(`Synced OUTBOUND transaction for productCode: ${op.payload.productCode}`);
-                } else {
-                    console.warn(`No suitable transactionAPI function found for operation: ${op.operation}`);
-                }
+                const firestorePayload = { ...op.payload };
+                delete firestorePayload.id; delete firestorePayload.pendingSync; delete firestorePayload.transactionDate;
+                if (op.operation === 'inbound') await window.transactionAPI.inboundStock(firestorePayload);
+                else if (op.operation === 'outbound') await window.transactionAPI.outboundStock(firestorePayload);
+                success = true;
+                console.log(`Sync: ${op.operation.toUpperCase()} transaction success for product ${op.payload.productCode}`);
             } else if (op.storeName === window.indexedDBManager.STORE_NAMES.SHIPMENTS) {
-                // Sync shipment operations
-                console.log(`Syncing SHIPMENT operation: ${op.operation}`, op.payload || op.itemId);
                 const shipmentPayload = op.payload;
                 const shipmentId = op.itemId || (shipmentPayload ? shipmentPayload.id : null);
-
-                if (op.operation === 'add' && window.shipmentAPI && typeof window.shipmentAPI.addShipment === 'function') {
+                if (op.operation === 'add') {
                     const firestorePayload = { ...shipmentPayload };
-                    delete firestorePayload.id; // Temp local ID
-                    delete firestorePayload.pendingSync;
-                    delete firestorePayload.createdAt; // Let server set it
-
-                    // The addShipment in API will handle adding to Firestore and then updating IDB with actual ID.
-                    // The listener will then pick up the final state.
-                    // Crucially, need to handle the local IDB item replacement with Firestore ID.
-                    // The current `addShipment` in API does this if online.
-                    // For sync, we are essentially re-doing the "online" part of addShipment.
-                    
-                    // We need to ensure the local temp item is removed and replaced by the one with Firestore ID.
-                    // The listener for shipments should handle adding the item with the Firestore ID.
-                    // The main challenge is if the listener adds it before this sync operation fully replaces the temp ID item.
-                    // A robust way: call addShipment, then explicitly remove the temp local item from IDB.
-                    // The listener should use updateItem (upsert) so it correctly places the server version.
-
-                    const newShipment = await window.shipmentAPI.addShipment(firestorePayload); // This will add to FS, then to IDB with FS ID.
-                    // If the original offline add used a temp ID, that temp ID item should be cleaned up from IDB shipments store.
-                    // The `addShipment` in API currently adds the `localShipmentData` to IDB first.
-                    // When syncing, we are re-adding. The listener should ideally handle the final state.
-                    // To be safe, after successful sync of an 'add', ensure the temp local ID version is gone.
+                    delete firestorePayload.id; delete firestorePayload.pendingSync; delete firestorePayload.createdAt;
+                    const newShipment = await window.shipmentAPI.addShipment(firestorePayload); // Relies on API to handle IDB update correctly
                     if (shipmentPayload.id && shipmentPayload.id.startsWith('local_shipment_')) {
                         await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.SHIPMENTS, shipmentPayload.id);
-                         console.log(`Removed temporary local shipment ${shipmentPayload.id} after sync.`);
                     }
-                     // The listener should add/update the item with the Firestore ID.
                     success = true;
-                    console.log(`Synced ADD shipment, new ID: ${newShipment.id}`);
-
-                } else if (op.operation === 'update' && shipmentId && window.shipmentAPI && typeof window.shipmentAPI.updateShipment === 'function') {
+                    console.log(`Sync: Shipment ADD success, new ID: ${newShipment.id}`);
+                } else if (op.operation === 'update' && shipmentId) {
                     const firestorePayload = { ...shipmentPayload };
-                    delete firestorePayload.id;
-                    delete firestorePayload.pendingSync;
-                    // `updatedAt` will be set by server in API
-                    
+                    delete firestorePayload.id; delete firestorePayload.pendingSync;
                     await window.shipmentAPI.updateShipment(shipmentId, firestorePayload);
-                     // updateShipment in API updates IDB after FS. Listener also updates.
                     success = true;
-                    console.log(`Synced UPDATE for shipment ID: ${shipmentId}`);
-
-                } else if (op.operation === 'delete' && shipmentId && window.shipmentAPI && typeof window.shipmentAPI.deleteShipment === 'function') {
-                    await window.shipmentAPI.deleteShipment(shipmentId); // API handles FS and IDB delete
+                    console.log(`Sync: Shipment UPDATE success for ID ${shipmentId}`);
+                } else if (op.operation === 'delete' && shipmentId) {
+                    await window.shipmentAPI.deleteShipment(shipmentId);
                     success = true;
-                    console.log(`Synced DELETE for shipment ID: ${shipmentId}`);
+                    console.log(`Sync: Shipment DELETE success for ID ${shipmentId}`);
+                }
+            } else if (op.storeName === 'shipment_excel_file' && op.operation === 'process_excel_shipment') {
+                if (window.shipmentProcessor && typeof window.shipmentProcessor.processQueuedShipmentData === 'function') {
+                    const result = await window.shipmentProcessor.processQueuedShipmentData(
+                        op.payload.allExtractedData, op.payload.containerNumber, op.payload.storedDate
+                    );
+                    if (result.success) {
+                        success = true;
+                        console.log(`Sync: Queued Excel shipment processed. ${result.message}`);
+                    } else {
+                        console.error(`Sync: Error processing queued Excel shipment: ${result.message || 'Unknown processor error.'}`);
+                    }
                 } else {
-                     console.warn(`No suitable shipmentAPI function found for shipment operation: ${op.operation}`);
+                    console.error("Sync: shipmentProcessor.processQueuedShipmentData unavailable.");
                 }
             }
-            // Add similar blocks for other storeNames or operations later
 
             if (success) {
                 await window.indexedDBManager.deleteItem(queueStoreName, op.id);
