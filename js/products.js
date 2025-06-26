@@ -3,14 +3,18 @@ let productFetchController = null; // To abort previous fetches
 let currentProductSearchTerm = '';
 const PRODUCTS_PER_PAGE = 10; 
 
-// New pagination state variables for client-side pagination
+// Pagination state variables (client-side pagination with IndexedDB)
 let currentPageNum = 1; 
 let totalNumPages = 1;
 let totalNumItems = 0;
-let globalHasNextPage = false; // This will now be set from api response.pagination.hasNextPage
+let globalHasNextPage = false;
 
 async function loadProducts() {
     const content = document.getElementById('content');
+    if (!content) {
+        console.error("Content element not found. Cannot load products page.");
+        return;
+    }
     content.innerHTML = `
         <div class="products">
             <div class="page-header">
@@ -47,11 +51,17 @@ async function loadProducts() {
         </div>
     `;
 
-    document.getElementById('add-product-btn').addEventListener('click', loadAddProductForm);
-    document.getElementById('product-search').addEventListener('input', handleProductSearch);
+    const addProductBtn = document.getElementById('add-product-btn');
+    if (addProductBtn) {
+        addProductBtn.addEventListener('click', loadAddProductForm);
+    }
     
-    // Initial fetch - fetch page 1
-    currentPageNum = 1; // Ensure we start at page 1
+    const productSearchInput = document.getElementById('product-search');
+    if (productSearchInput) {
+        productSearchInput.addEventListener('input', handleProductSearch);
+    }
+    
+    currentPageNum = 1; 
     await fetchProducts({
         searchTerm: currentProductSearchTerm,
         limit: PRODUCTS_PER_PAGE,
@@ -59,9 +69,12 @@ async function loadProducts() {
     });
 }
 
-// Updated to accept 'page' instead of 'startAfterDoc' and 'isPrev'
 async function fetchProducts({ searchTerm = '', limit = PRODUCTS_PER_PAGE, page = 1 } = {}) {
     const tbody = document.getElementById('products-table-body');
+    if (!tbody) {
+        console.error("Products table body not found. Cannot fetch products.");
+        return;
+    }
     tbody.innerHTML = `<tr><td colspan="5" class="text-center">Loading products...</td></tr>`;
 
     if (productFetchController) {
@@ -71,13 +84,10 @@ async function fetchProducts({ searchTerm = '', limit = PRODUCTS_PER_PAGE, page 
     const signal = productFetchController.signal;
 
     try {
-        const params = {
-            searchTerm: searchTerm,
-            limit: limit,
-            page: page 
-        };
-        
-        // API now returns { data: [], pagination: { currentPage, totalPages, hasNextPage, ... } }
+        if (!window.productAPI || typeof window.productAPI.getProducts !== 'function') {
+            throw new Error("productAPI or productAPI.getProducts function is not available.");
+        }
+        const params = { searchTerm, limit, page };
         const response = await window.productAPI.getProducts(params); 
         
         if (signal.aborted) {
@@ -87,11 +97,10 @@ async function fetchProducts({ searchTerm = '', limit = PRODUCTS_PER_PAGE, page 
 
         renderProductsTable(response.data);
         
-        // Update pagination state from the response
         currentPageNum = response.pagination.currentPage;
         totalNumPages = response.pagination.totalPages;
         totalNumItems = response.pagination.totalItems;
-        globalHasNextPage = response.pagination.hasNextPage; // Use hasNextPage from API
+        globalHasNextPage = response.pagination.hasNextPage;
 
         renderPagination(); 
 
@@ -100,9 +109,11 @@ async function fetchProducts({ searchTerm = '', limit = PRODUCTS_PER_PAGE, page 
             console.log('Fetch aborted by user.');
         } else {
             console.error('Failed to fetch product list:', error);
-            tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error loading products: ${error.message}</td></tr>`;
-            // Potentially clear pagination display on error too, or show an error state there
-            document.getElementById('pagination').innerHTML = '<p class="text-danger text-center">Pagination unavailable.</p>';
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error loading products: ${escapeHtml(error.message)}</td></tr>`;
+            const paginationDiv = document.getElementById('pagination');
+            if (paginationDiv) {
+                paginationDiv.innerHTML = '<p class="text-danger text-center">Pagination unavailable.</p>';
+            }
         }
     } finally {
         productFetchController = null; 
@@ -111,10 +122,12 @@ async function fetchProducts({ searchTerm = '', limit = PRODUCTS_PER_PAGE, page 
 
 function renderProductsTable(products) {
     const tbody = document.getElementById('products-table-body');
+    if (!tbody) return;
     tbody.innerHTML = '';
 
     if (!products || products.length === 0) {
-        const searchTerm = document.getElementById('product-search').value.trim();
+        const productSearchInput = document.getElementById('product-search');
+        const searchTerm = productSearchInput ? productSearchInput.value.trim() : '';
         tbody.innerHTML = `
             <tr>
                 <td colspan="5" class="no-data text-center">
@@ -128,17 +141,13 @@ function renderProductsTable(products) {
     products.forEach(product => {
         const row = document.createElement('tr');
         let createdAtDisplay = 'N/A';
-        // Ensure createdAt is handled correctly, might not be a Firestore Timestamp anymore in cache
         if (product.createdAt) {
-            if (product.createdAt.seconds) { // Likely a Firestore Timestamp object from cache
-                 createdAtDisplay = new Date(product.createdAt.seconds * 1000).toLocaleString();
-            } else if (typeof product.createdAt === 'string' || typeof product.createdAt === 'number') {
-                 createdAtDisplay = new Date(product.createdAt).toLocaleString(); // Already converted or just a date string/number
-            } else if (product.createdAt.toDate) { // Should have been converted by API, but as fallback
-                 createdAtDisplay = product.createdAt.toDate().toLocaleString();
+            try {
+                createdAtDisplay = new Date(product.createdAt).toLocaleString();
+            } catch (e) {
+                console.warn("Could not parse createdAt date for product:", product.id, product.createdAt, e);
             }
         }
-
 
         let productDescription = escapeHtml(product.name || '');
         if (product['Chinese Name']) {
@@ -151,13 +160,13 @@ function renderProductsTable(products) {
             <td>${escapeHtml(product.packaging || '')}</td>
             <td>${escapeHtml(createdAtDisplay)}</td>
             <td class="actions">
-                <button class="btn-icon view-btn" data-id="${escapeHtml(product.id)}">
+                <button class="btn-icon view-btn" data-id="${escapeHtml(product.id || '')}">
                     <i class="fas fa-eye"></i>
                 </button>
-                <button class="btn-icon edit-btn" data-id="${escapeHtml(product.id)}">
+                <button class="btn-icon edit-btn" data-id="${escapeHtml(product.id || '')}">
                     <i class="fas fa-edit"></i>
                 </button>
-                <button class="btn-icon delete-btn" data-id="${escapeHtml(product.id)}">
+                <button class="btn-icon delete-btn" data-id="${escapeHtml(product.id || '')}">
                     <i class="fas fa-trash"></i>
                 </button>
             </td>
@@ -176,20 +185,13 @@ function renderProductsTable(products) {
     });
 }
 
-// Updated to use currentPageNum and totalNumPages
 function renderPagination() {
     const paginationDiv = document.getElementById('pagination');
-    paginationDiv.innerHTML = ''; // Clear previous buttons
+    if (!paginationDiv) return;
+    paginationDiv.innerHTML = ''; 
 
-    if (totalNumItems === 0 && !currentProductSearchTerm) { // Only show if no items and not searching
-        // No pagination needed if no items and not a search result
-        return;
-    }
-    if (totalNumPages <= 1 && currentProductSearchTerm && totalNumItems <= PRODUCTS_PER_PAGE) {
-        // No pagination needed if only one page of search results
-        return;
-    }
-
+    if (totalNumItems === 0 && !currentProductSearchTerm) return;
+    if (totalNumPages <= 1 && (!currentProductSearchTerm || (currentProductSearchTerm && totalNumItems <= PRODUCTS_PER_PAGE))) return;
 
     const prevBtn = document.createElement('button');
     prevBtn.className = 'btn-pagination';
@@ -197,16 +199,11 @@ function renderPagination() {
     prevBtn.innerHTML = '<i class="fas fa-chevron-left"></i> Previous';
     prevBtn.addEventListener('click', () => {
         if (currentPageNum > 1) {
-            fetchProducts({ 
-                searchTerm: currentProductSearchTerm, 
-                limit: PRODUCTS_PER_PAGE, 
-                page: currentPageNum - 1
-            });
+            fetchProducts({ searchTerm: currentProductSearchTerm, limit: PRODUCTS_PER_PAGE, page: currentPageNum - 1 });
         }
     });
     paginationDiv.appendChild(prevBtn);
 
-    // Display Page X of Y
     const pageInfo = document.createElement('span');
     pageInfo.className = 'page-info';
     pageInfo.textContent = `Page ${currentPageNum} of ${totalNumPages} (${totalNumItems} items)`;
@@ -214,15 +211,11 @@ function renderPagination() {
 
     const nextBtn = document.createElement('button');
     nextBtn.className = 'btn-pagination';
-    nextBtn.disabled = !globalHasNextPage; // Use globalHasNextPage set from API response
+    nextBtn.disabled = !globalHasNextPage;
     nextBtn.innerHTML = 'Next <i class="fas fa-chevron-right"></i>';
     nextBtn.addEventListener('click', () => {
         if (globalHasNextPage) {
-            fetchProducts({ 
-                searchTerm: currentProductSearchTerm, 
-                limit: PRODUCTS_PER_PAGE, 
-                page: currentPageNum + 1
-            });
+            fetchProducts({ searchTerm: currentProductSearchTerm, limit: PRODUCTS_PER_PAGE, page: currentPageNum + 1 });
         }
     });
     paginationDiv.appendChild(nextBtn);
@@ -230,17 +223,13 @@ function renderPagination() {
 
 function handleProductSearch(e) {
     currentProductSearchTerm = e.target.value.trim();
-    currentPageNum = 1; // Reset to first page for new search
-    // No need to reset other pagination vars like totalPages, they will be updated by fetchProducts
-    fetchProducts({ 
-        searchTerm: currentProductSearchTerm, 
-        limit: PRODUCTS_PER_PAGE, 
-        page: currentPageNum 
-    });
+    currentPageNum = 1; 
+    fetchProducts({ searchTerm: currentProductSearchTerm, limit: PRODUCTS_PER_PAGE, page: currentPageNum });
 }
 
 function loadAddProductForm() {
     const content = document.getElementById('content');
+     if (!content) return;
     content.innerHTML = `
         <div class="form-container">
             <h1>Add Product</h1>
@@ -255,8 +244,7 @@ function loadAddProductForm() {
                 </div>
                 <div class="form-group">
                     <label for="packaging">Packing Size*</label>
-                    <input type="text" id="packaging" name="packaging" required 
-                           placeholder="Example: 250g x 40p">
+                    <input type="text" id="packaging" name="packaging" required placeholder="Example: 250g x 40p">
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" id="cancel-btn">Cancel</button>
@@ -265,53 +253,43 @@ function loadAddProductForm() {
             </form>
         </div>
     `;
-
-    document.getElementById('cancel-btn').addEventListener('click', () => {
-        currentProductSearchTerm = ''; 
-        currentPageNum = 1; // Reset to page 1
-        loadProducts(); // This will call fetchProducts with page 1
-    });
-    document.getElementById('product-form').addEventListener('submit', handleAddProduct);
+    const cancelBtn = document.getElementById('cancel-btn');
+    if(cancelBtn) cancelBtn.addEventListener('click', () => { currentProductSearchTerm = ''; currentPageNum = 1; loadProducts(); });
+    
+    const productForm = document.getElementById('product-form');
+    if(productForm) productForm.addEventListener('submit', handleAddProduct);
 }
 
 async function handleAddProduct(e) {
     e.preventDefault();
     const form = e.target;
-    const formData = new FormData(form);
     const productData = {
-        productCode: formData.get('productCode'),
-        name: formData.get('name'),
-        packaging: formData.get('packaging')
+        productCode: form.productCode.value,
+        name: form.name.value,
+        packaging: form.packaging.value
     };
     
     try {
-        await window.productAPI.addProduct(productData); // This will invalidate cache in api.js
+        if (!window.productAPI || typeof window.productAPI.addProduct !== 'function') throw new Error("productAPI.addProduct is not available.");
+        await window.productAPI.addProduct(productData);
         alert('产品添加成功!');
         currentProductSearchTerm = ''; 
-        currentPageNum = 1; // Reset to page 1
-        // No need to directly manipulate cache here, api.js handles invalidation
-        loadProducts(); // This will trigger a fresh fetch (if cache was invalidated) for page 1
+        currentPageNum = 1; 
+        loadProducts(); 
     } catch (error) {
-        console.error('添加产品失败 (Firestore):', error);
+        console.error('添加产品失败:', error);
         alert('添加产品失败: ' + error.message);
     }
 }
 
 async function viewProduct(productId) {
     try {
-        // console.log('Viewing product (Firestore):', productId); // Commenting out as it's not from Firestore directly anymore
-        // Potentially, this could try to get from cache first if we implement getProductById in cache
-        const product = await window.productAPI.getProductById(productId); // Assumes getProductById still hits Firestore
+        if (!window.productAPI || typeof window.productAPI.getProductById !== 'function') throw new Error("productAPI.getProductById is not available.");
+        const product = await window.productAPI.getProductById(productId);
         if (product) {
             let createdAtString = 'N/A';
             if (product.createdAt) {
-                 if (product.createdAt.seconds) { 
-                    createdAtString = new Date(product.createdAt.seconds * 1000).toLocaleString();
-                } else if (typeof product.createdAt === 'string' || typeof product.createdAt === 'number') {
-                    createdAtString = new Date(product.createdAt).toLocaleString();
-                } else if (product.createdAt.toDate) {
-                    createdAtString = product.createdAt.toDate().toLocaleString();
-                }
+                try { createdAtString = new Date(product.createdAt).toLocaleString(); } catch (e) { console.warn("Error parsing createdAt for view", e); }
             }
             const chineseNameDisplay = product['Chinese Name'] ? `\nChinese Name: ${escapeHtml(product['Chinese Name'])}` : '';
             alert(`Product Details:\nID: ${escapeHtml(product.id)}\nCode: ${escapeHtml(product.productCode)}\nName: ${escapeHtml(product.name)}${chineseNameDisplay}\nPackaging: ${escapeHtml(product.packaging)}\nCreated At: ${escapeHtml(createdAtString)}`);
@@ -326,15 +304,15 @@ async function viewProduct(productId) {
 
 async function editProduct(productId) {
     try {
-        // console.log('Editing product (Firestore):', productId);
-        const product = await window.productAPI.getProductById(productId); // Assumes getProductById still hits Firestore
+        if (!window.productAPI || typeof window.productAPI.getProductById !== 'function') throw new Error("productAPI.getProductById is not available.");
+        const product = await window.productAPI.getProductById(productId);
         if (product) {
-            // console.log('Product data for editing:', product);
             const content = document.getElementById('content');
+            if (!content) return;
             content.innerHTML = `
                 <div class="form-container">
                     <h1>Edit Product</h1>
-                    <form id="edit-product-form" data-product-id="${escapeHtml(product.id)}">
+                    <form id="edit-product-form" data-product-id="${escapeHtml(product.id || '')}">
                         <div class="form-group">
                             <label for="edit-productCode">Item Code*</label>
                             <input type="text" id="edit-productCode" name="productCode" value="${escapeHtml(product.productCode || '')}" required>
@@ -349,8 +327,7 @@ async function editProduct(productId) {
                         </div>
                         <div class="form-group">
                             <label for="edit-packaging">Packing Size*</label>
-                            <input type="text" id="edit-packaging" name="packaging" value="${escapeHtml(product.packaging || '')}" required 
-                                   placeholder="Example: 250g x 40p">
+                            <input type="text" id="edit-packaging" name="packaging" value="${escapeHtml(product.packaging || '')}" required placeholder="Example: 250g x 40p">
                         </div>
                         <div class="form-actions">
                             <button type="button" class="btn btn-secondary" id="cancel-edit-product-btn">Cancel</button>
@@ -359,12 +336,11 @@ async function editProduct(productId) {
                     </form>
                 </div>
             `;
-
-            document.getElementById('cancel-edit-product-btn').addEventListener('click', () => {
-                currentPageNum = 1; // Reset to page 1 before loading products
-                loadProducts(); 
-            });
-            document.getElementById('edit-product-form').addEventListener('submit', handleUpdateProduct);
+            const cancelEditBtn = document.getElementById('cancel-edit-product-btn');
+            if(cancelEditBtn) cancelEditBtn.addEventListener('click', () => { currentPageNum = 1; loadProducts(); });
+            
+            const editForm = document.getElementById('edit-product-form');
+            if(editForm) editForm.addEventListener('submit', handleUpdateProduct);
 
         } else {
             alert('Product not found for editing.');
@@ -380,16 +356,10 @@ async function editProduct(productId) {
 async function deleteProduct(productId) {
     if (confirm(`Are you sure you want to delete this product (ID: ${escapeHtml(productId)})?`)) {
         try {
-            await window.productAPI.deleteProduct(productId); // This will invalidate cache in api.js
+            if (!window.productAPI || typeof window.productAPI.deleteProduct !== 'function') throw new Error("productAPI.deleteProduct is not available.");
+            await window.productAPI.deleteProduct(productId);
             alert('Product deleted successfully!');
-            // No need to change currentPageNum here, try to stay on the same page.
-            // If it was the last item on a page, the re-fetch might result in an empty page,
-            // or totalPages might decrease. renderPagination will handle the display.
-            // If currentPageNum > totalNumPages after delete and re-fetch, fetchProducts
-            // should ideally handle this by clamping page to totalNumPages (or API does).
-            // For now, just re-fetch current page. API should return correct totalPages.
-            loadProducts(); // Re-fetch with current page and search term. 
-                           // If cache was invalidated, it'll get fresh data.
+            loadProducts(); 
         } catch (error) {
             console.error('Failed to delete product:', error);
             alert('Failed to delete product: ' + error.message);
@@ -401,13 +371,12 @@ async function handleUpdateProduct(e) {
     e.preventDefault();
     const form = e.target;
     const productId = form.dataset.productId;
-    const formData = new FormData(form);
-
-    const updatedProductData = {
-        productCode: formData.get('productCode'),
-        name: formData.get('name'),
-        'Chinese Name': formData.get('chineseName'), 
-        packaging: formData.get('packaging')
+    
+    const updatedProductData = { 
+        productCode: form.productCode.value,
+        name: form.name.value,
+        'Chinese Name': form.chineseName.value, 
+        packaging: form.packaging.value
     };
 
     if (!updatedProductData.productCode || !updatedProductData.name || !updatedProductData.packaging) {
@@ -421,14 +390,14 @@ async function handleUpdateProduct(e) {
             saveButton.disabled = true;
             saveButton.textContent = 'Saving...';
         }
-
-        await window.productAPI.updateProduct(productId, updatedProductData); // This invalidates cache
+        if (!window.productAPI || typeof window.productAPI.updateProduct !== 'function') throw new Error("productAPI.updateProduct is not available.");
+        await window.productAPI.updateProduct(productId, updatedProductData);
         alert('Product updated successfully!');
-        // currentProductSearchTerm and currentPageNum remain the same
-        loadProducts(); // Reload the product list to see changes, respecting current page/search
+        loadProducts(); 
     } catch (error) {
         console.error('Failed to update product:', error);
         alert('Failed to update product: ' + error.message);
+    } finally {
         if (saveButton) {
             saveButton.disabled = false;
             saveButton.textContent = 'Save Changes';
