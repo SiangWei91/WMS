@@ -305,7 +305,10 @@ async function clearStore(storeName) {
         const store = transaction.objectStore(storeName);
         const request = store.clear();
 
-        request.onsuccess = () => resolve();
+        request.onsuccess = () => {
+            console.log(`Store "${storeName}" cleared successfully from IndexedDB.`);
+            resolve();
+        };
         request.onerror = (event) => {
             console.error(`Error clearing store ${storeName}:`, event.target.error);
             reject(`Error clearing store ${storeName}: ${event.target.error}`);
