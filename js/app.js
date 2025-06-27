@@ -401,6 +401,21 @@ function loadPage(page) {
         break;
     case 'inbound': loadInboundForm(); break;
     case 'outbound': loadOutboundForm(); break;
+    case 'stock-take':
+        mainContentArea.innerHTML = '<h1>Stock Take (Coming Soon)</h1>';
+        break;
+    case 'order':
+        mainContentArea.innerHTML = '<h1>Order (Coming Soon)</h1>';
+        break;
+    case 'cr-temperature':
+        mainContentArea.innerHTML = '<h1>CR Temperature (Coming Soon)</h1>';
+        break;
+    case 'service-record':
+        mainContentArea.innerHTML = '<h1>Service Record (Coming Soon)</h1>';
+        break;
+    case 'packaging-material':
+        mainContentArea.innerHTML = '<h1>Packaging Material (Coming Soon)</h1>';
+        break;
     case 'shipment':
         fetch('shipment.html')
             .then(response => {
