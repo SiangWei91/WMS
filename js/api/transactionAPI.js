@@ -295,20 +295,56 @@ const transactionAPI_module = { // Renamed for clarity
                         console.log(`Transaction listener: Processing ${changes.length} change(s) from Firestore.`);
                     }
                     for (const change of changes) {
-                        let txData = { id: change.doc.id, ...change.doc.data() };
-                        if (txData.transactionDate && txData.transactionDate.toDate) {
-                            txData.transactionDate = txData.transactionDate.toDate().toISOString();
+                        const rawData = change.doc.data();
+                        const operatorId = rawData.operatorId;
+                        const docId = change.doc.id;
+
+                        if (operatorId === 'system_excel_import') {
+                            // Check if the transactionDate is null or not a Firestore Timestamp object
+                            if (rawData.transactionDate === null || typeof rawData.transactionDate?.toDate !== 'function') {
+                                console.log(`[Transaction Listener - Excel Import] Skipping doc ID ${docId} for now (operatorId: ${operatorId}). transactionDate is null or not a Firestore Timestamp. Value:`, rawData.transactionDate);
+                                // Skip this change, wait for the update with the resolved server timestamp
+                                continue; 
+                            }
+                            // console.log('[Transaction Listener - Excel Import] Raw data received (valid date expected):', JSON.parse(JSON.stringify(rawData)));
+                            // console.log('[Transaction Listener - Excel Import] Raw transactionDate from Firestore (valid date expected):', rawData.transactionDate);
                         }
+
+                        let txData = { id: docId, ...rawData };
+
+                        if (txData.transactionDate && typeof txData.transactionDate.toDate === 'function') {
+                            // if (operatorId === 'system_excel_import') {
+                            //     console.log('[Transaction Listener - Excel Import] Attempting to convert transactionDate to ISOString. Original:', txData.transactionDate);
+                            // }
+                            try {
+                                txData.transactionDate = txData.transactionDate.toDate().toISOString();
+                                // if (operatorId === 'system_excel_import') {
+                                //     console.log('[Transaction Listener - Excel Import] Converted transactionDate to ISOString:', txData.transactionDate);
+                                // }
+                            } catch (e) {
+                                console.error('[Transaction Listener] Error converting transactionDate to ISOString:', e, 'Original value:', txData.transactionDate, 'Doc ID:', docId);
+                                // If conversion fails, it might remain a Firestore Timestamp object.
+                                // Depending on strictness, you might want to skip or set to null.
+                                // For now, let it proceed and see if areObjectsShallowEqual catches it or if IDB errors.
+                            }
+                        } else if (txData.transactionDate !== null && operatorId === 'system_excel_import') {
+                            // This case should ideally not be hit if the above skip logic works for null/unresolved timestamps.
+                            // However, if it's some other non-convertible format, log it.
+                            console.warn(`[Transaction Listener - Excel Import] Doc ID ${docId}: transactionDate is present but not a convertable Firestore Timestamp. Value:`, txData.transactionDate);
+                        }
+                        
                         if (change.type === "added" || change.type === "modified") {
                             const existingItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, txData.id);
-                            if (!existingItem || !areObjectsShallowEqual(existingItem, txData, ['transactionDate'])) { 
+                            if (!existingItem || !areObjectsShallowEqual(existingItem, txData, ['transactionDate'])) {
                                 itemsToUpdate.push(txData);
+                            } else {
+                                // console.log(`[Transaction Listener] Doc ID ${txData.id} data is same as in IDB, skipping update.`);
                             }
-                            changedCount++; 
+                            changedCount++;
                         }
                         if (change.type === "removed") {
                             itemIdsToDelete.push(txData.id);
-                            changedCount++; 
+                            changedCount++;
                         }
                     }
 
