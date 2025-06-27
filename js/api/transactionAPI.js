@@ -491,3 +491,4 @@ const transactionAPI_module = { // Renamed for clarity
 };
 
 window.transactionAPI = transactionAPI_module;
+console.log("transactionAPI.js executed and window.transactionAPI assigned:", window.transactionAPI && typeof window.transactionAPI.listenToTransactionChanges === 'function');
