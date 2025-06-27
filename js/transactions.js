@@ -3,8 +3,12 @@ let transactionsCurrentPage = 1;
 const transactionsRowsPerPage = 10;
 let currentTransactionFilters = {}; // Store current filters
 
-async function loadTransactions() {
-    const content = document.getElementById('content');
+export async function loadTransactions(contentElement) { // Added export, accept contentElement
+    const content = contentElement || document.getElementById('content'); // Use passed element or fallback
+    if (!content) {
+        console.error("Content element not found. Cannot load transactions page.");
+        return;
+    }
     content.innerHTML = `
         <div class="transactions">
             <div class="page-header">
