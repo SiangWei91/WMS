@@ -307,6 +307,7 @@ function closeProductTransactionsModal() {
     const transactionsContentDiv = document.getElementById('modal-transactions-content');
     if (transactionsContentDiv) transactionsContentDiv.innerHTML = '';
 }
+window.closeProductTransactionsModal = closeProductTransactionsModal; // Expose to global scope
 
 async function displayProductTransactions(productCode, productName, packaging) {
     if (!productCode) { alert("Product code is missing."); return; }
