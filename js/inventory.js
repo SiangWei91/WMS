@@ -18,8 +18,25 @@ const WAREHOUSE_ABBREVIATIONS = {
 
 function formatTransactionDate(timestamp) {
     if (!timestamp) return '-';
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleString();
+    let date;
+    // Check if timestamp is a Firestore Timestamp object, an ISO string, or a number
+    if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+        date = timestamp.toDate();
+    } else {
+        date = new Date(timestamp); // Handles ISO strings and numbers
+    }
+
+    if (isNaN(date.getTime())) { // Check if date is valid
+        return 'Invalid Date';
+    }
+
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+    const year = String(date.getFullYear()).slice(-2); // Get last two digits of the year
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
 
 function getTransactionTypeText(type) {
@@ -41,11 +58,11 @@ export async function loadInventory(contentElement) { // Added export, accept co
     content.innerHTML = `
         <div class="inventory">
             <div class="page-header"><h1>Inventory Management</h1></div>
-            <div class="controls-container" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;">
+            <div class="controls-container">
                 <button id="expand-collapse-btn" class="btn btn-info">Expand Details</button>
-                <div class="search-box" style="margin-left: auto;">
-                    <i class="fas fa-search" style="position: absolute; margin-left: 10px; margin-top: 11px; color: #aaa;"></i>
-                    <input type="text" id="inventory-search" placeholder="Search by Item Code/Desc..." style="padding-left: 30px; height: 38px; border-radius: 0.25rem; border: 1px solid #ced4da;">
+                <div class="search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="inventory-search" placeholder="Search by Item Code/Desc...">
                 </div>
             </div>
             <div class="table-container">
@@ -364,7 +381,13 @@ async function displayProductTransactions(productCode, productName, packaging) {
                 const quantityCell = row.insertCell();
                 quantityCell.textContent = (tx.type === 'inbound' || tx.type === 'initial' ? '+' : '-') + quantity;
                 quantityCell.className = (tx.type === 'inbound' || tx.type === 'initial') ? 'text-success' : 'text-danger';
-                row.insertCell().textContent = tx.batchNo || '-';
+                
+                // Display "Internal Transfer" for batchNo if it starts with "TRANSFER-"
+                let batchNoDisplay = tx.batchNo || '-';
+                if (tx.batchNo && tx.batchNo.startsWith('TRANSFER-')) {
+                    batchNoDisplay = 'Internal Transfer';
+                }
+                row.insertCell().textContent = batchNoDisplay;
                 row.insertCell().textContent = currentBalance;
             });
         }
