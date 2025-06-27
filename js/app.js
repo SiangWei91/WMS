@@ -1,3 +1,10 @@
+// Imports for page-specific loading functions
+import { loadProducts } from './products.js';
+import { loadInventory } from './inventory.js';
+import { loadTransactions } from './transactions.js';
+import { initializeShipmentFeature } from './shipment.js';
+// Assuming initJordonPage is handled by dynamic import in loadJordonPage or becomes a module import if jordon.js is refactored.
+
 // HTML Templates for dynamic navigation items
 const NAV_ITEM_JORDON_HTML = `
     <li data-page="jordon" id="nav-jordon" class="dynamic-nav-item">
@@ -76,7 +83,7 @@ document.addEventListener('DOMContentLoaded', function () {
             window.indexedDBManagerReady.then(() => {
               console.log("IndexedDB is ready, attempting to attach product listener.");
               if (window.productAPI && typeof window.productAPI.listenToProductChanges === 'function') {
-                  const debouncedLoadProducts = debounce(loadProducts, 500); 
+                  const debouncedLoadProductsCallback = debounce(loadProducts, 500); 
 
                   window.productAPI.listenToProductChanges((updateInfo) => {
                       if (updateInfo.error) {
@@ -87,11 +94,7 @@ document.addEventListener('DOMContentLoaded', function () {
                       const activePageLi = document.querySelector('.sidebar nav ul li.active');
                       if (activePageLi && activePageLi.dataset.page === 'products') {
                           console.log('Product page is active, reloading product list via debounced function...');
-                          if (typeof loadProducts === 'function') {
-                              debouncedLoadProducts();
-                          } else {
-                              console.warn("loadProducts function is not defined, cannot refresh product list.");
-                          }
+                          debouncedLoadProductsCallback(mainContentArea);
                       } else {
                           console.log("Product page not active, IndexedDB updated in background.");
                       }
@@ -111,7 +114,7 @@ document.addEventListener('DOMContentLoaded', function () {
             window.indexedDBManagerReady.then(() => {
               console.log("IndexedDB is ready, attempting to attach inventory listener.");
               if (window.inventoryAPI && typeof window.inventoryAPI.listenToInventoryChanges === 'function') {
-                  const debouncedLoadInventory = debounce(loadInventory, 500);
+                  const debouncedLoadInventoryCallback = debounce(loadInventory, 500);
 
                   window.inventoryAPI.listenToInventoryChanges((updateInfo) => {
                       if (updateInfo.error) {
@@ -122,11 +125,7 @@ document.addEventListener('DOMContentLoaded', function () {
                       const activePageLi = document.querySelector('.sidebar nav ul li.active');
                       if (activePageLi && activePageLi.dataset.page === 'inventory') {
                           console.log('Inventory page is active, reloading inventory list via debounced function...');
-                          if (typeof loadInventory === 'function') {
-                            debouncedLoadInventory();
-                          } else {
-                              console.warn("loadInventory function is not defined, cannot refresh inventory list.");
-                          }
+                          debouncedLoadInventoryCallback(mainContentArea);
                       } else {
                           console.log("Inventory page not active, IndexedDB updated in background.");
                       }
@@ -146,7 +145,7 @@ document.addEventListener('DOMContentLoaded', function () {
             window.indexedDBManagerReady.then(() => {
               console.log("IndexedDB is ready, attempting to attach transaction listener.");
               if (window.transactionAPI && typeof window.transactionAPI.listenToTransactionChanges === 'function') {
-                  const debouncedLoadTransactions = debounce(loadTransactions, 500);
+                  const debouncedLoadTransactionsCallback = debounce(loadTransactions, 500);
 
                   window.transactionAPI.listenToTransactionChanges((updateInfo) => {
                       if (updateInfo.error) {
@@ -157,11 +156,7 @@ document.addEventListener('DOMContentLoaded', function () {
                       const activePageLi = document.querySelector('.sidebar nav ul li.active');
                       if (activePageLi && activePageLi.dataset.page === 'transactions') {
                           console.log('Transaction page is active, reloading transaction list via debounced function...');
-                          if (typeof loadTransactions === 'function') {
-                            debouncedLoadTransactions();
-                          } else {
-                              console.warn("loadTransactions function is not defined, cannot refresh transaction list.");
-                          }
+                          debouncedLoadTransactionsCallback(mainContentArea);
                       } else {
                           console.log("Transaction page not active, IndexedDB updated in background.");
                       }
@@ -181,8 +176,7 @@ document.addEventListener('DOMContentLoaded', function () {
             window.indexedDBManagerReady.then(() => {
               console.log("IndexedDB is ready, attempting to attach shipment listener.");
               if (window.shipmentAPI && typeof window.shipmentAPI.listenToShipmentChanges === 'function') {
-                  // Assuming a loadShipments function exists or will be created for the shipment page UI
-                  const debouncedLoadShipments = debounce(typeof loadShipments === 'function' ? loadShipments : () => console.warn("loadShipments function not defined but listener triggered."), 500);
+                  const debouncedInitializeShipmentFeatureCallback = debounce(initializeShipmentFeature, 500);
 
                   window.shipmentAPI.listenToShipmentChanges((updateInfo) => {
                       if (updateInfo.error) {
@@ -191,9 +185,12 @@ document.addEventListener('DOMContentLoaded', function () {
                       }
                       console.log('Shipment data changed via listener:', updateInfo);
                       const activePageLi = document.querySelector('.sidebar nav ul li.active');
-                      if (activePageLi && activePageLi.dataset.page === 'shipment') { // Assuming 'shipment' is the data-page value
-                          console.log('Shipment page is active, reloading shipment list via debounced function...');
-                          debouncedLoadShipments();
+                      if (activePageLi && activePageLi.dataset.page === 'shipment') { 
+                          console.log('Shipment page is active, reloading shipment page via debounced function...');
+                          // initializeShipmentFeature in shipment.js finds its own DOM elements.
+                          // It's called with mainContentArea by loadPage, but doesn't use the argument.
+                          // Calling it here with mainContentArea for consistency.
+                          debouncedInitializeShipmentFeatureCallback(mainContentArea); 
                       } else {
                           console.log("Shipment page not active, IndexedDB updated in background.");
                       }
@@ -354,12 +351,16 @@ function loadPage(page) {
         loadDashboard(); 
         break;
     case 'products': 
+        // Dynamic import is already a good practice.
+        // loadProducts is imported at the top and can be called directly if needed,
+        // but the dynamic import here ensures it's loaded on demand for this page.
+        // The imported loadProducts will be used by the listener.
         import('./products.js')
             .then(module => {
                 if (module.loadProducts && typeof module.loadProducts === 'function') {
-                    module.loadProducts(mainContentArea); // Pass content area if needed by module
+                    module.loadProducts(mainContentArea); 
                 } else {
-                    console.error("loadProducts function not found in products.js module.");
+                    console.error("loadProducts function not found in products.js module via dynamic import.");
                     mainContentArea.innerHTML = '<p style="color: red;">Error: Could not load products page components.</p>';
                 }
             })
@@ -372,9 +373,9 @@ function loadPage(page) {
         import('./inventory.js')
             .then(module => {
                 if (module.loadInventory && typeof module.loadInventory === 'function') {
-                    module.loadInventory(mainContentArea); // Pass content area
+                    module.loadInventory(mainContentArea); 
                 } else {
-                    console.error("loadInventory function not found in inventory.js module.");
+                    console.error("loadInventory function not found in inventory.js module via dynamic import.");
                     mainContentArea.innerHTML = '<p style="color: red;">Error: Could not load inventory page components.</p>';
                 }
             })
@@ -387,9 +388,9 @@ function loadPage(page) {
         import('./transactions.js')
             .then(module => {
                 if (module.loadTransactions && typeof module.loadTransactions === 'function') {
-                    module.loadTransactions(mainContentArea); // Pass content area
+                    module.loadTransactions(mainContentArea); 
                 } else {
-                    console.error("loadTransactions function not found in transactions.js module.");
+                    console.error("loadTransactions function not found in transactions.js module via dynamic import.");
                     mainContentArea.innerHTML = '<p style="color: red;">Error: Could not load transactions page components.</p>';
                 }
             })
@@ -408,13 +409,15 @@ function loadPage(page) {
             })
             .then(html => {
                 mainContentArea.innerHTML = html;
-                return import('./shipment.js'); // Dynamically import JS module
+                // shipment.js is now imported at the top as well.
+                // The dynamic import here is fine, module.initializeShipmentFeature will be the same function.
+                return import('./shipment.js'); 
             })
             .then(module => {
                 if (module.initializeShipmentFeature && typeof module.initializeShipmentFeature === 'function') {
-                    module.initializeShipmentFeature(mainContentArea); // Pass content area
+                    module.initializeShipmentFeature(mainContentArea); 
                 } else {
-                    console.error("initializeShipmentFeature function not found in shipment.js module.");
+                    console.error("initializeShipmentFeature function not found in shipment.js module via dynamic import.");
                 }
             })
             .catch(error => {
@@ -440,8 +443,8 @@ async function loadJordonPage() {
         import('./jordon.js')
             .then(module => {
                 if (module.initJordonPage && typeof module.initJordonPage === 'function') {
-                    module.initJordonPage(content); // Assuming initJordonPage is the new main function in jordon.js
-                } else if (typeof initJordonTabs === 'function') { // Fallback for older structure if needed
+                    module.initJordonPage(content); 
+                } else if (typeof initJordonTabs === 'function') { 
                     console.warn("initJordonPage not found in jordon.js, falling back to global initJordonTabs (if available). Consider exporting initJordonPage from jordon.js.");
                     initJordonTabs(content); 
                 }
@@ -451,7 +454,6 @@ async function loadJordonPage() {
             })
             .catch(error => {
                 console.error('Failed to load jordon.js module:', error);
-                // HTML is loaded, but JS might have failed.
             });
     } catch (error) {
         console.error('Failed to load Jordon page HTML:', error);
@@ -576,7 +578,7 @@ async function handleOutboundSubmit(e) {
 
     try {
       if (!window.productAPI || !window.transactionAPI) throw new Error("API not available.");
-      const product = await window.productAPI.getProductByCode(rawData.productCode); // Corrected typo from getProductBy_Code
+      const product = await window.productAPI.getProductByCode(rawData.productCode); 
       if (!product) throw new Error(`Product with code "${rawData.productCode}" not found.`);
 
       await window.transactionAPI.outboundStock({
