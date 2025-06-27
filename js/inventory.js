@@ -336,9 +336,14 @@ async function displayProductTransactions(productCode, productName, packaging) {
     openProductTransactionsModal();
 
     try {
+        console.log(`[displayProductTransactions] Fetching transactions for productCode: ${productCode}`);
         const response = await window.transactionAPI.getTransactions({ productCode: productCode, limit: 1000 }); 
         const allTransactions = response.data || [];
+        // Deep clone for logging to avoid logging proxies or complex objects that console might struggle with.
+        console.log(`[displayProductTransactions] Received ${allTransactions.length} transactions raw:`, JSON.parse(JSON.stringify(allTransactions)));
+
         if (allTransactions.length === 0) {
+            console.log(`[displayProductTransactions] No transactions found for product: ${productName} (Code: ${productCode})`);
             transactionsContentDiv.innerHTML = `<p class="text-center">No transactions found for ${productName}.</p>`;
             return;
         }
@@ -351,9 +356,13 @@ async function displayProductTransactions(productCode, productName, packaging) {
         }, {});
         const warehouseNameMap = currentWarehouses.reduce((map, wh) => { map[wh.id] = wh.name; return map; }, {});
 
+        console.log(`[displayProductTransactions] Transactions grouped by warehouse:`, JSON.parse(JSON.stringify(transactionsByWarehouse)));
+
         for (const warehouseId in transactionsByWarehouse) {
             const warehouseTransactions = transactionsByWarehouse[warehouseId];
             const warehouseName = warehouseNameMap[warehouseId] || `Unknown (ID: ${warehouseId})`;
+            console.log(`[displayProductTransactions] Processing transactions for warehouse: ${warehouseName} (ID: ${warehouseId})`, JSON.parse(JSON.stringify(warehouseTransactions)));
+
             const heading = document.createElement('h4');
             heading.className = 'warehouse-transaction-heading'; 
             heading.textContent = `Warehouse: ${warehouseName}`;
@@ -392,7 +401,7 @@ async function displayProductTransactions(productCode, productName, packaging) {
             });
         }
     } catch (error) {
-        console.error(`Error fetching transactions for product ${productCode}:`, error);
+        console.error(`[displayProductTransactions] Error fetching transactions for product ${productCode}:`, error);
         transactionsContentDiv.innerHTML = `<p class="text-center text-danger">Error loading transactions.</p>`;
     }
 }
@@ -503,13 +512,16 @@ async function handleInternalTransferSubmit() {
         productId, // May be null if not available from aggregated view
         productCode,
         productName,
+        packaging, // Added packaging to payload, though API might not use it, good for logging
         sourceWarehouseId,
         destinationWarehouseId,
         quantity: quantityToTransfer,
         operatorId
     };
 
-    console.log("Submitting internal transfer:", transferPayload);
+    console.log("[handleInternalTransferSubmit] Submitting internal transfer with payload:", JSON.parse(JSON.stringify(transferPayload)));
+    console.log("[handleInternalTransferSubmit] Current transfer data context:", JSON.parse(JSON.stringify(currentTransferData)));
+
     const submitBtn = document.getElementById('submit-internal-transfer-btn');
     submitBtn.disabled = true;
     submitBtn.textContent = 'Processing...';
@@ -519,12 +531,13 @@ async function handleInternalTransferSubmit() {
             throw new Error("Internal transfer API function is not available.");
         }
         await window.transactionAPI.performInternalTransfer(transferPayload);
-        alert('Internal transfer submitted successfully!');
+        alert('Internal transfer submitted successfully!'); // This alert might be premature if transactions aren't created
         closeInternalTransferModal();
+        console.log("[handleInternalTransferSubmit] Transfer attempt complete, refreshing inventory view.");
         fetchDataAndDisplayInventory(); // Refresh inventory view
     } catch (error) {
-        console.error("Error performing internal transfer:", error);
-        errorMessageDiv.textContent = `Error: ${error.message}`;
+        console.error("[handleInternalTransferSubmit] Error performing internal transfer:", error);
+        errorMessageDiv.textContent = `Transfer Error: ${error.message || 'Unknown error'}`;
     } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = 'Submit Transfer';
