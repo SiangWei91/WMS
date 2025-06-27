@@ -98,6 +98,7 @@ nav ul li i {
   padding: 0 30px;
 }
 
+/* This .search-bar class seems to be for a different search bar, maybe global? Retaining it. */
 .search-bar {
   display: flex;
   align-items: center;
@@ -325,21 +326,62 @@ tr:hover {
   gap: 15px;
 }
 
+/* Search Box Styles (updated for consistency) */
+/* This specific .search-box is used on product page, inventory page etc. */
 .search-box {
+  position: relative; /* For icon positioning */
   display: flex;
   align-items: center;
-  background-color: #f8f9fa;
-  padding: 8px 15px;
-  border-radius: 20px;
+  width: 250px; /* Default width, can be overridden if needed elsewhere */
 }
 
-.search-box input {
-  border: none;
-  background: transparent;
-  outline: none;
-  margin-left: 10px;
-  width: 200px;
+.search-box i.fa-search { /* Be more specific for the search icon */
+  position: absolute;
+  left: 12px; 
+  top: 50%;
+  transform: translateY(-50%);
+  color: #999; 
+  font-size: 0.9em; 
+  z-index: 1; 
 }
+
+.search-box input[type="text"] {
+  width: 100%;
+  padding: 10px 15px 10px 35px; /* Left padding for icon */
+  border: 1px solid #ced4da;
+  border-radius: 0.25rem; 
+  height: 38px; 
+  background-color: #fff; 
+  outline: none;
+  font-size: 0.9rem; 
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.search-box input[type="text"]::placeholder {
+  color: #999;
+}
+
+.search-box input[type="text"]:focus {
+  border-color: #80bdff; 
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25); 
+}
+
+/* Container for top controls on pages like Inventory */
+.controls-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 8px; 
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05); 
+}
+
+.controls-container .search-box {
+  margin-left: 15px; /* Add some space if there's a button to its left */
+}
+
 
 /* Button styles */
 .btn-icon {
