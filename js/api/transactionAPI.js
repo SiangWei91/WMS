@@ -3,6 +3,7 @@
 
 const transactionAPI_module = { // Renamed for clarity
     async getTransactions(params = {}) {
+        console.log('[transactionAPI.getTransactions] Called with params:', JSON.parse(JSON.stringify(params))); // Log params
         await ensureDbManager();
         const { productCode, type, startDate, endDate, limit = 10, currentPage = 1 } = params;
 
@@ -38,19 +39,23 @@ const transactionAPI_module = { // Renamed for clarity
             } else if (endDate) {
                 range = IDBKeyRange.upperBound(new Date(endDate).toISOString());
             }
+            console.log('[transactionAPI.getTransactions] Using range for IndexedDB query:', range); // Log range
 
             const results = [];
             let totalItems = 0;
             const offset = (currentPage - 1) * limit;
             let cursorAdvancement = offset;
             let hasMoreDataForNextPage = false;
+            let rawCountAll = 0; // Log raw count
 
             await new Promise((resolveCount, rejectCount) => {
-                const countCursorRequest = index.openCursor(range, 'prev'); 
+                const countCursorRequest = index.openCursor(range, 'prev');
                 countCursorRequest.onsuccess = event => {
                     const cursor = event.target.result;
                     if (cursor) {
+                        rawCountAll++; // Count all items iterated by cursor
                         const item = cursor.value;
+                        // console.log('[transactionAPI.getTransactions countCursor] Iterating item:', JSON.parse(JSON.stringify(item))); // Potentially very verbose
                         let match = true;
                         if (productCode && item.productCode !== productCode) match = false;
                         if (type && item.type !== type) match = false;
@@ -60,18 +65,22 @@ const transactionAPI_module = { // Renamed for clarity
                         }
                         cursor.continue();
                     } else {
+                        console.log(`[transactionAPI.getTransactions countCursor] Raw items iterated by count cursor: ${rawCountAll}, Matched items for total: ${totalItems}`);
                         resolveCount();
                     }
                 };
                 countCursorRequest.onerror = event => rejectCount(event.target.error);
             });
             
+            let rawItemsIteratedMain = 0; // Log raw items for main cursor
             await new Promise((resolveCursor, rejectCursor) => {
                 const cursorRequest = index.openCursor(range, 'prev'); 
                 cursorRequest.onsuccess = event => {
                     const cursor = event.target.result;
                     if (cursor) {
+                        rawItemsIteratedMain++;
                         const item = cursor.value;
+                        // console.log('[transactionAPI.getTransactions mainCursor] Iterating item:', JSON.parse(JSON.stringify(item))); // Potentially very verbose
                         let match = true;
                         if (productCode && item.productCode !== productCode) match = false;
                         if (type && item.type !== type) match = false;
@@ -89,12 +98,14 @@ const transactionAPI_module = { // Renamed for clarity
                         }
                         cursor.continue();
                     } else {
+                        console.log(`[transactionAPI.getTransactions mainCursor] Raw items iterated by main cursor: ${rawItemsIteratedMain}`);
                         resolveCursor(); 
                     }
                 };
                 cursorRequest.onerror = event => rejectCursor(event.target.error);
             });
             
+            console.log('[transactionAPI.getTransactions] Returning results:', JSON.parse(JSON.stringify(results)), 'Total items matching filters:', totalItems); // Log final results
             return {
                 data: results,
                 pagination: {
@@ -302,8 +313,20 @@ const transactionAPI_module = { // Renamed for clarity
                     }
 
                     if (itemsToUpdate.length > 0) {
-                        await window.indexedDBManager.bulkPutItems(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, itemsToUpdate);
-                         console.log(`Transaction listener: Bulk updated/added ${itemsToUpdate.length} items in IndexedDB.`);
+                        console.log(`[transactionAPI listener] About to call bulkPutItems for ${itemsToUpdate.length} items.`); // New log
+                        try {
+                            await window.indexedDBManager.bulkPutItems(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, itemsToUpdate);
+                            console.log(`[transactionAPI listener] bulkPutItems completed for ${itemsToUpdate.length} items.`); // New Log
+                            
+                            // Verification step
+                            console.log(`[transactionAPI listener] After bulkPut completion, trying to verify IDB content for transactions.`);
+                            const allTxInIDB = await window.indexedDBManager.getAllItems(window.indexedDBManager.STORE_NAMES.TRANSACTIONS);
+                            console.log(`[transactionAPI listener] Verification: ${allTxInIDB.length} items found in IDB transactions store immediately after bulkPut. First item (if any):`, allTxInIDB[0] ? JSON.parse(JSON.stringify(allTxInIDB[0])) : 'N/A');
+                        } catch (err) {
+                            console.error('[transactionAPI listener] Error during bulkPutItems or subsequent verification:', err);
+                        }
+                         // Original log moved slightly to be outside the try if only bulkPutItems is in try, but it's fine here.
+                        console.log(`Transaction listener: Finished processing updates for ${itemsToUpdate.length} items in IndexedDB.`);
                     }
                     for (const idToDelete of itemIdsToDelete) {
                         await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, idToDelete);
