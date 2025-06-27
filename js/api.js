@@ -497,8 +497,6 @@ const productAPI_indexedDB = {
                             const existingItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productData.id);
                             if (!existingItem || !areObjectsShallowEqual(existingItem, productData, ['updatedAt'])) {
                                 itemsToUpdate.push(productData);
-                            } else {
-                                console.log("Product listener: Update skipped for IDB, no significant change:", productData.id);
                             }
                         }
                         if (change.type === "removed") {
