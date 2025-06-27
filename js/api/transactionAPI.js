@@ -411,17 +411,23 @@ const transactionAPI_module = { // Renamed for clarity
         const { 
             productId, productCode, productName, 
             sourceWarehouseId, destinationWarehouseId, 
-            quantity, operatorId 
+            quantity, operatorId, batchNo, // Expect actual product batchNo here
+            sourceBatchDocId // Firestore document ID of the batch entry in 'inventory' collection
         } = transferData;
 
         if (!productCode || !sourceWarehouseId || !destinationWarehouseId || !quantity || isNaN(Number(quantity))) {
-            console.error("[performInternalTransfer] Invalid transferData received:", JSON.parse(JSON.stringify(transferData)));
+            console.error("[performInternalTransfer] Invalid transferData received (basic validation):", JSON.parse(JSON.stringify(transferData)));
             throw new Error("Invalid data for internal transfer. Missing required fields or invalid quantity.");
         }
+        // It's possible that batchNo might be null or undefined if not applicable for a product,
+        // so we don't strictly require it in the validation above unless business logic demands all transfers must have a batch.
+        // For now, we'll pass it along if present.
 
         const numericQuantity = Number(quantity);
-        const batchNoForTransfer = `TRANSFER-${sourceWarehouseId}-TO-${destinationWarehouseId}`;
-        console.log(`[performInternalTransfer] Generated batchNo: ${batchNoForTransfer}`);
+        // This 'batchNoForTransfer' is actually a reference ID for the transfer operation itself.
+        // Let's keep its generation but ensure the actual product batchNo is also handled.
+        const operationReferenceBatchNo = `TRANSFER-${sourceWarehouseId}-TO-${destinationWarehouseId}`;
+        console.log(`[performInternalTransfer] Generated operationReferenceBatchNo: ${operationReferenceBatchNo}`);
 
         const commonTxData = {
             productId: productId || null, 
@@ -429,7 +435,13 @@ const transactionAPI_module = { // Renamed for clarity
             productName,
             quantity: numericQuantity,
             operatorId,
-            batchNo: batchNoForTransfer, 
+            productBatchNo: batchNo, // Storing the actual product's batch number
+            batchNo: operationReferenceBatchNo, // This is the transfer operation's reference ID
+            // Note: The original 'batchNo' field in transactions will now store the operationReferenceBatchNo.
+            // The actual product's batch is stored in 'productBatchNo'.
+            // This is a choice: alternatively, one could rename the transaction field e.g. transaction.operationRef 
+            // and keep transaction.batchNo for the product's batch.
+            // For now, adding a new field 'productBatchNo' is less disruptive to existing queries on 'batchNo'.
         };
 
         const outboundTx = {
@@ -460,9 +472,26 @@ const transactionAPI_module = { // Renamed for clarity
                 const inboundTxRef = window.db.collection('transactions').doc();
                 batch.set(inboundTxRef, { ...inboundTx, transactionDate: firebase.firestore.FieldValue.serverTimestamp() });
                 console.log(`[performInternalTransfer] Staging INBOUND tx (ID: ${inboundTxRef.id}) to batch.`);
+
+                // Update the specific batch document in the 'inventory' collection for the source warehouse
+                if (sourceBatchDocId) {
+                    const sourceBatchRef = window.db.collection('inventory').doc(sourceBatchDocId);
+                    // It's safer to use FieldValue.increment with a negative value for atomic updates.
+                    // This also handles the case where the document might be updated by another process concurrently.
+                    batch.update(sourceBatchRef, {
+                        quantity: firebase.firestore.FieldValue.increment(-numericQuantity),
+                        lastUpdated: firebase.firestore.FieldValue.serverTimestamp() // Also update lastUpdated timestamp
+                    });
+                    console.log(`[performInternalTransfer] Staging update to source batch document (ID: ${sourceBatchDocId}) to decrement quantity by ${numericQuantity}.`);
+                } else {
+                    // This case should ideally be prevented by UI requiring batch selection if batches exist.
+                    // If sourceBatchDocId is missing, it implies we can't update the specific batch.
+                    // This might be an error or an old transfer style. For now, log a warning.
+                    console.warn(`[performInternalTransfer] sourceBatchDocId is missing. Cannot update specific source batch quantity in 'inventory' collection.`);
+                }
                 
                 await batch.commit();
-                console.log(`[performInternalTransfer] ONLINE batch commit SUCCESS. Outbound Tx ID: ${outboundTxRef.id}, Inbound Tx ID: ${inboundTxRef.id}`);
+                console.log(`[performInternalTransfer] ONLINE batch commit SUCCESS. Outbound Tx ID: ${outboundTxRef.id}, Inbound Tx ID: ${inboundTxRef.id}. Source batch doc update staged if ID provided.`);
                 return { status: "success", outboundTxId: outboundTxRef.id, inboundTxId: inboundTxRef.id };
             } else {
                 console.log("[performInternalTransfer] OFFLINE mode detected.");
