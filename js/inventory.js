@@ -32,8 +32,12 @@ function getTransactionBadgeClass(type) {
     return classes[type] || 'badge-secondary';
 }
 
-async function loadInventory() {
-    const content = document.getElementById('content');
+export async function loadInventory(contentElement) { // Added export, accept contentElement
+    const content = contentElement || document.getElementById('content'); // Use passed element or fallback
+    if (!content) {
+        console.error("Content element not found. Cannot load inventory page.");
+        return;
+    }
     content.innerHTML = `
         <div class="inventory">
             <div class="page-header"><h1>Inventory Management</h1></div>
