@@ -9,8 +9,8 @@ let totalNumPages = 1;
 let totalNumItems = 0;
 let globalHasNextPage = false;
 
-async function loadProducts() {
-    const content = document.getElementById('content');
+export async function loadProducts(contentElement) { // Added export, accept contentElement
+    const content = contentElement || document.getElementById('content'); // Use passed element or fallback
     if (!content) {
         console.error("Content element not found. Cannot load products page.");
         return;
@@ -53,7 +53,7 @@ async function loadProducts() {
 
     const addProductBtn = document.getElementById('add-product-btn');
     if (addProductBtn) {
-        addProductBtn.addEventListener('click', loadAddProductForm);
+        addProductBtn.addEventListener('click', () => loadAddProductForm(content)); // Pass content
     }
     
     const productSearchInput = document.getElementById('product-search');
@@ -227,8 +227,8 @@ function handleProductSearch(e) {
     fetchProducts({ searchTerm: currentProductSearchTerm, limit: PRODUCTS_PER_PAGE, page: currentPageNum });
 }
 
-function loadAddProductForm() {
-    const content = document.getElementById('content');
+function loadAddProductForm(contentElement) { // Accept contentElement
+    const content = contentElement || document.getElementById('content');
      if (!content) return;
     content.innerHTML = `
         <div class="form-container">
@@ -254,13 +254,13 @@ function loadAddProductForm() {
         </div>
     `;
     const cancelBtn = document.getElementById('cancel-btn');
-    if(cancelBtn) cancelBtn.addEventListener('click', () => { currentProductSearchTerm = ''; currentPageNum = 1; loadProducts(); });
+    if(cancelBtn) cancelBtn.addEventListener('click', () => { currentProductSearchTerm = ''; currentPageNum = 1; loadProducts(content); }); // Pass content
     
     const productForm = document.getElementById('product-form');
-    if(productForm) productForm.addEventListener('submit', handleAddProduct);
+    if(productForm) productForm.addEventListener('submit', (e) => handleAddProduct(e, content)); // Pass content
 }
 
-async function handleAddProduct(e) {
+async function handleAddProduct(e, contentElement) { // Accept contentElement
     e.preventDefault();
     const form = e.target;
     const productData = {
@@ -275,7 +275,7 @@ async function handleAddProduct(e) {
         alert('产品添加成功!');
         currentProductSearchTerm = ''; 
         currentPageNum = 1; 
-        loadProducts(); 
+        loadProducts(contentElement); // Pass contentElement
     } catch (error) {
         console.error('添加产品失败:', error);
         alert('添加产品失败: ' + error.message);
@@ -302,12 +302,12 @@ async function viewProduct(productId) {
     }
 }
 
-async function editProduct(productId) {
+async function editProduct(productId) { // Assuming this might be called when products.js is already loaded
+    const content = document.getElementById('content'); // Keep using ID here or pass mainContentArea if refactoring app.js more
     try {
         if (!window.productAPI || typeof window.productAPI.getProductById !== 'function') throw new Error("productAPI.getProductById is not available.");
         const product = await window.productAPI.getProductById(productId);
         if (product) {
-            const content = document.getElementById('content');
             if (!content) return;
             content.innerHTML = `
                 <div class="form-container">
@@ -337,15 +337,15 @@ async function editProduct(productId) {
                 </div>
             `;
             const cancelEditBtn = document.getElementById('cancel-edit-product-btn');
-            if(cancelEditBtn) cancelEditBtn.addEventListener('click', () => { currentPageNum = 1; loadProducts(); });
+            if(cancelEditBtn) cancelEditBtn.addEventListener('click', () => { currentPageNum = 1; loadProducts(content); }); // Pass content
             
             const editForm = document.getElementById('edit-product-form');
-            if(editForm) editForm.addEventListener('submit', handleUpdateProduct);
+            if(editForm) editForm.addEventListener('submit', (e) => handleUpdateProduct(e, content)); // Pass content
 
         } else {
             alert('Product not found for editing.');
             currentPageNum = 1;
-            loadProducts(); 
+            loadProducts(content); // Pass content
         }
     } catch (error) {
         console.error('Failed to fetch product for editing:', error);
@@ -353,13 +353,14 @@ async function editProduct(productId) {
     }
 }
 
-async function deleteProduct(productId) {
+async function deleteProduct(productId) { // Assuming this is called when products.js is loaded
+    const content = document.getElementById('content'); // Or pass mainContentArea
     if (confirm(`Are you sure you want to delete this product (ID: ${escapeHtml(productId)})?`)) {
         try {
             if (!window.productAPI || typeof window.productAPI.deleteProduct !== 'function') throw new Error("productAPI.deleteProduct is not available.");
             await window.productAPI.deleteProduct(productId);
             alert('Product deleted successfully!');
-            loadProducts(); 
+            loadProducts(content); // Pass content
         } catch (error) {
             console.error('Failed to delete product:', error);
             alert('Failed to delete product: ' + error.message);
@@ -367,7 +368,7 @@ async function deleteProduct(productId) {
     }
 }
 
-async function handleUpdateProduct(e) {
+async function handleUpdateProduct(e, contentElement) { // Accept contentElement
     e.preventDefault();
     const form = e.target;
     const productId = form.dataset.productId;
@@ -393,7 +394,7 @@ async function handleUpdateProduct(e) {
         if (!window.productAPI || typeof window.productAPI.updateProduct !== 'function') throw new Error("productAPI.updateProduct is not available.");
         await window.productAPI.updateProduct(productId, updatedProductData);
         alert('Product updated successfully!');
-        loadProducts(); 
+        loadProducts(contentElement); // Pass contentElement
     } catch (error) {
         console.error('Failed to update product:', error);
         alert('Failed to update product: ' + error.message);
