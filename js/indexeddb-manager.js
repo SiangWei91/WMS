@@ -1,5 +1,5 @@
 const DB_NAME = 'InventoryAppDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Incremented version to ensure onupgradeneeded runs
 let iDb; // Renamed from db to avoid potential clashes
 
 const STORE_NAMES = {
@@ -43,7 +43,7 @@ function initDB() {
                 const productStore = tempDb.createObjectStore(STORE_NAMES.PRODUCTS, { keyPath: 'id', autoIncrement: false });
                 productStore.createIndex('productCode', 'productCode', { unique: true });
                 productStore.createIndex('name', 'name', { unique: false });
-                productStore.createIndex('chineseName', 'Chinese Name', { unique: false }); // Index for Chinese Name
+                productStore.createIndex('chineseName', 'chineseName', { unique: false }); // Corrected keyPath
                 console.log(`Object store '${STORE_NAMES.PRODUCTS}' created.`);
             } else {
                 // If the store exists, check and add the new index if missing (for upgrades)
@@ -51,7 +51,7 @@ function initDB() {
                 if (transaction) { // Should always be true in onupgradeneeded
                     const productStore = transaction.objectStore(STORE_NAMES.PRODUCTS);
                     if (!productStore.indexNames.contains('chineseName')) {
-                        productStore.createIndex('chineseName', 'Chinese Name', { unique: false });
+                        productStore.createIndex('chineseName', 'chineseName', { unique: false }); // Corrected keyPath
                         console.log("Index 'chineseName' created on products store.");
                     }
                 }
