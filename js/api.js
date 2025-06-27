@@ -1153,9 +1153,37 @@ window.transactionAPI = {
                 pendingSync: true
             };
             await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE, {
-                storeName: 'transactions', operation: 'inbound', payload: localInboundTx, timestamp: new Date().toISOString()
+                storeName: 'transactions', operation: 'outbound', payload: localOutboundTx, timestamp: new Date().toISOString()
             });
-            console.log("Internal transfer transactions queued offline.");
+            // Also add to local IDB transactions store for immediate UI update
+            try {
+                await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, localOutboundTx);
+                console.log("Offline internal transfer: Outbound leg added to IDB transactions store.");
+            } catch (idbError) {
+                console.error("Error adding offline outbound transfer leg to IDB transactions store:", idbError);
+            }
+
+            // Define localInboundTx correctly (it was defined before the previous try/catch for localOutboundTx)
+            // This is the corrected part: use the existing localInboundTx variable
+            const localInboundTxToStore = { // Renaming to avoid any confusion if needed, but using the existing one is fine
+                ...inboundTx, // inboundTx is defined much earlier
+                id: `local_tx_${new Date().getTime()}_in_${Math.random().toString(36).substr(2, 5)}`, // Ensure unique ID for this leg
+                transactionDate: new Date().toISOString(), 
+                pendingSync: true
+            };
+
+            await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE, {
+                storeName: 'transactions', operation: 'inbound', payload: localInboundTxToStore, timestamp: new Date().toISOString()
+            });
+            // Also add to local IDB transactions store for immediate UI update
+            try {
+                await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, localInboundTxToStore);
+                console.log("Offline internal transfer: Inbound leg added to IDB transactions store.");
+            } catch (idbError) {
+                console.error("Error adding offline inbound transfer leg to IDB transactions store:", idbError);
+            }
+            
+            console.log("Internal transfer transactions queued offline and added to local IDB transaction store.");
             return { status: "queued_offline", outboundTxId: localOutboundTx.id, inboundTxId: localInboundTx.id };
         }
     }
