@@ -143,8 +143,19 @@
     <script src="js/firebase-init.js"></script>
     <!-- IndexedDB Manager FIRST -->
     <script src="js/indexeddb-manager.js"></script>
-    <!-- API that depends on IndexedDB Manager -->
+
+    <!-- API Modules -->
+    <script src="js/api/listeners.js"></script>
+    <script src="js/api/helpers.js"></script>
+    <script src="js/api/productAPI.js"></script>
+    <script src="js/api/inventoryAPI.js"></script>
+    <script src="js/api/transactionAPI.js"></script>
+    <script src="js/api/shipmentAPI.js"></script>
+    <script src="js/api/jordonAPI.js"></script>
+    <script src="js/api/dashboardAPI.js"></script>
+    <!-- Main API file (refactored) -->
     <script src="js/api.js"></script>
+
     <!-- SheetJS library, loaded before app.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- app.js is the main entry module and will import other necessary scripts like products.js, inventory.js, etc. -->
