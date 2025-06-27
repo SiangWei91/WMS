@@ -264,6 +264,88 @@ document.addEventListener('DOMContentLoaded', function () {
           });
       });
   }
+
+  const dropdownClearFirestoreButton = document.getElementById('dropdown-clear-firestore-button');
+  if (dropdownClearFirestoreButton) {
+    dropdownClearFirestoreButton.addEventListener('click', async function(event) {
+      event.preventDefault();
+      const avatarDropdown = document.getElementById('avatar-dropdown');
+      if (avatarDropdown) {
+        avatarDropdown.classList.remove('show');
+      }
+
+      const collectionsToClear = [
+        'inventory',
+        'inventory_aggregated',
+        'jordonWithdrawForms',
+        'transactions'
+      ];
+
+      if (window.firestoreAdminAPI && typeof window.firestoreAdminAPI.clearFirestoreCollections === 'function') {
+        try {
+          await window.firestoreAdminAPI.clearFirestoreCollections(collectionsToClear);
+          
+          // Clear corresponding IndexedDB stores
+          if (window.indexedDBManager && typeof window.indexedDBManager.clearStore === 'function') {
+            for (const collectionName of collectionsToClear) {
+              // Map Firestore collection names to IndexedDB store names if they are different.
+              // Assuming they are the same for now, or direct mapping.
+              // STORE_NAMES.TRANSACTIONS, STORE_NAMES.INVENTORY etc. are defined in indexeddb-manager.js
+              let storeToClear = null;
+              if (collectionName === 'transactions' && window.indexedDBManager.STORE_NAMES.TRANSACTIONS) {
+                storeToClear = window.indexedDBManager.STORE_NAMES.TRANSACTIONS;
+              } else if (collectionName === 'inventory_aggregated' && window.indexedDBManager.STORE_NAMES.INVENTORY) { 
+                // Assuming 'inventory_aggregated' in Firestore maps to 'inventory' in IndexedDB
+                storeToClear = window.indexedDBManager.STORE_NAMES.INVENTORY;
+              } else if (collectionName === 'inventory' && window.indexedDBManager.STORE_NAMES.INVENTORY_DETAIL) { // Example if you had inventory_detail
+                // storeToClear = window.indexedDBManager.STORE_NAMES.INVENTORY_DETAIL; // Placeholder
+                console.warn(`IndexedDB clearing for Firestore collection '${collectionName}' not explicitly mapped yet. Add mapping if needed.`);
+              } else if (collectionName === 'jordonWithdrawForms') {
+                  console.warn(`IndexedDB clearing for Firestore collection '${collectionName}' not implemented as no direct IDB store mapping known.`);
+              }
+              // Add other mappings here if needed e.g. products, shipments
+
+              if (storeToClear) {
+                console.log(`Attempting to clear IndexedDB store: ${storeToClear} (mapped from Firestore collection: ${collectionName})`);
+                await window.indexedDBManager.clearStore(storeToClear);
+              }
+            }
+          } else {
+            console.warn('window.indexedDBManager.clearStore is not available. Skipping IndexedDB clear.');
+          }
+
+          // Force a re-render of the current page if it's relevant
+          const activePageLi = document.querySelector('.sidebar nav ul li.active');
+          const activePage = activePageLi ? activePageLi.dataset.page : null;
+
+          if (activePage === 'transactions' && collectionsToClear.includes('transactions')) {
+            console.log('Transaction page is active, reloading transaction list after clear.');
+            // Ensure loadTransactions is available and mainContentArea is defined
+            if (typeof loadTransactions === 'function' && mainContentArea) {
+              loadTransactions(mainContentArea); 
+            } else {
+              console.warn('loadTransactions function or mainContentArea not available for reload.');
+            }
+          } else if (activePage === 'inventory' && collectionsToClear.includes('inventory_aggregated')) {
+            console.log('Inventory page is active, reloading inventory list after clear.');
+            if (typeof loadInventory === 'function' && mainContentArea) { // Assuming loadInventory exists
+              loadInventory(mainContentArea);
+            } else {
+              console.warn('loadInventory function or mainContentArea not available for reload.');
+            }
+          }
+          // Add more else if blocks for other pages if needed
+
+        } catch (error) {
+          console.error('Error during clear Firestore collections or IndexedDB stores:', error);
+          alert('An unexpected error occurred while clearing data. Check the console.');
+        }
+      } else {
+        console.error('firestoreAdminAPI.clearFirestoreCollections is not available.');
+        alert('Error: Clear collections functionality is not loaded correctly.');
+      }
+    });
+  }
 });
 
 function createNavItem(htmlString) {
