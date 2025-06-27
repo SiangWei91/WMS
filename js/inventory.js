@@ -66,7 +66,40 @@ export async function loadInventory(contentElement) { // Added export, accept co
                 <button onclick="closeProductTransactionsModal()" style="margin-top: 15px;" class="btn btn-secondary">Close</button>
             </div>
         </div>
-        <!-- Placeholder for Internal Transfer Modal - to be added in next step -->
+        <div id="internal-transfer-modal" class="modal" style="display:none;">
+            <div class="modal-content">
+                <span id="close-internal-transfer-modal-btn" class="close-button">&times;</span>
+                <h2 style="margin-top:0;">Internal Stock Transfer</h2>
+                
+                <p><strong>Product Code:</strong> <span id="transfer-product-code"></span></p>
+                <p><strong>Product Name:</strong> <span id="transfer-product-name"></span></p>
+                <p><strong>Packaging:</strong> <span id="transfer-product-packaging"></span></p>
+                <p><strong>From Warehouse:</strong> <span id="transfer-source-warehouse"></span></p>
+                <p><strong>Available Quantity:</strong> <span id="transfer-available-qty"></span></p>
+                
+                <hr>
+                
+                <div class="form-group">
+                    <label for="transfer-quantity">Quantity to Transfer:</label>
+                    <input type="number" id="transfer-quantity" class="form-control" min="1">
+                </div>
+                
+                <div class="form-group">
+                    <label for="transfer-destination-warehouse">To Warehouse:</label>
+                    <select id="transfer-destination-warehouse" class="form-control">
+                        <option value="">-- Select Destination --</option>
+                        <!-- Options will be populated by JS -->
+                    </select>
+                </div>
+                
+                <div id="internal-transfer-error-message" style="color: red; margin-bottom: 10px;"></div>
+                
+                <div style="text-align: right;">
+                    <button id="cancel-internal-transfer-btn" class="btn btn-secondary" style="margin-right: 10px;">Cancel</button>
+                    <button id="submit-internal-transfer-btn" class="btn btn-primary">Submit Transfer</button>
+                </div>
+            </div>
+        </div>
     `;
 
     document.getElementById('inventory-search').addEventListener('input', handleInventorySearch);
