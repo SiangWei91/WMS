@@ -335,10 +335,15 @@ const transactionAPI_module = { // Renamed for clarity
                         
                         if (change.type === "added" || change.type === "modified") {
                             const existingItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, txData.id);
-                            if (!existingItem || !areObjectsShallowEqual(existingItem, txData, ['transactionDate'])) {
+                            // If it's a new item, or if the transactionDate has changed, 
+                            // or if other fields have changed (checked by areObjectsShallowEqual ignoring transactionDate)
+                            if (!existingItem || 
+                                existingItem.transactionDate !== txData.transactionDate || 
+                                !areObjectsShallowEqual(existingItem, txData, ['transactionDate'])
+                            ) {
                                 itemsToUpdate.push(txData);
                             } else {
-                                // console.log(`[Transaction Listener] Doc ID ${txData.id} data is same as in IDB, skipping update.`);
+                                // console.log(`[Transaction Listener] Doc ID ${txData.id} data is same as in IDB (considering transactionDate separately), skipping update.`);
                             }
                             changedCount++;
                         }
