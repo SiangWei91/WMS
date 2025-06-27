@@ -613,7 +613,7 @@ function processNewFile(file) {
     reader.readAsArrayBuffer(file);
 }
   
-function initializeShipmentFeature() {
+export function initializeShipmentFeature() {
     console.log('Initializing Shipment Feature...');
     const fileInput = document.getElementById('excelFileInput');
     shipmentModuleState.currentResultsContainer = document.getElementById('resultsContainer');
