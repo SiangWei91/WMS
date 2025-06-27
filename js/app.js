@@ -444,12 +444,12 @@ async function loadJordonPage() {
             .then(module => {
                 if (module.initJordonPage && typeof module.initJordonPage === 'function') {
                     module.initJordonPage(content); 
-                } else if (typeof initJordonTabs === 'function') { 
-                    console.warn("initJordonPage not found in jordon.js, falling back to global initJordonTabs (if available). Consider exporting initJordonPage from jordon.js.");
-                    initJordonTabs(content); 
+                } else if (module.initJordonTabs && typeof module.initJordonTabs === 'function') { 
+                    console.warn("initJordonPage not found in jordon.js, using module.initJordonTabs.");
+                    module.initJordonTabs(content); 
                 }
                 else {
-                    console.error("initJordonPage (or initJordonTabs) function not found in jordon.js module or globally.");
+                    console.error("Neither initJordonPage nor initJordonTabs found in jordon.js module.");
                 }
             })
             .catch(error => {
