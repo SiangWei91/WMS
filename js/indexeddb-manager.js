@@ -43,7 +43,18 @@ function initDB() {
                 const productStore = tempDb.createObjectStore(STORE_NAMES.PRODUCTS, { keyPath: 'id', autoIncrement: false });
                 productStore.createIndex('productCode', 'productCode', { unique: true });
                 productStore.createIndex('name', 'name', { unique: false });
+                productStore.createIndex('chineseName', 'Chinese Name', { unique: false }); // Index for Chinese Name
                 console.log(`Object store '${STORE_NAMES.PRODUCTS}' created.`);
+            } else {
+                // If the store exists, check and add the new index if missing (for upgrades)
+                const transaction = event.target.transaction;
+                if (transaction) { // Should always be true in onupgradeneeded
+                    const productStore = transaction.objectStore(STORE_NAMES.PRODUCTS);
+                    if (!productStore.indexNames.contains('chineseName')) {
+                        productStore.createIndex('chineseName', 'Chinese Name', { unique: false });
+                        console.log("Index 'chineseName' created on products store.");
+                    }
+                }
             }
 
             // Inventory store (caching documents from inventory_aggregated, using productCode as key)
@@ -64,8 +75,22 @@ function initDB() {
                 transactionStore.createIndex('type', 'type', { unique: false }); // e.g., 'inbound', 'outbound'
                 transactionStore.createIndex('productId', 'productId', { unique: false });
                 transactionStore.createIndex('productCode', 'productCode', { unique: false });
-                transactionStore.createIndex('timestamp', 'timestamp', { unique: false });
+                transactionStore.createIndex('transactionDate', 'transactionDate', { unique: false }); // Corrected index name
                 console.log(`Object store '${STORE_NAMES.TRANSACTIONS}' created.`);
+            } else {
+                // Handle upgrade: if store exists, check/delete old 'timestamp' index and add 'transactionDate'
+                const transaction = event.target.transaction;
+                if (transaction) {
+                    const transactionStore = transaction.objectStore(STORE_NAMES.TRANSACTIONS);
+                    if (transactionStore.indexNames.contains('timestamp')) {
+                        transactionStore.deleteIndex('timestamp');
+                        console.log("Index 'timestamp' deleted from transactions store.");
+                    }
+                    if (!transactionStore.indexNames.contains('transactionDate')) {
+                        transactionStore.createIndex('transactionDate', 'transactionDate', { unique: false });
+                        console.log("Index 'transactionDate' created on transactions store.");
+                    }
+                }
             }
             
             // Shipments store
@@ -87,6 +112,56 @@ function initDB() {
                 console.log(`Object store '${STORE_NAMES.OFFLINE_QUEUE}' created.`);
             }
             iDb = tempDb; // Assign the upgraded DB to the global iDb variable
+        };
+    });
+}
+
+/**
+ * Adds or updates multiple items in a specified object store in a single transaction.
+ * Uses put(), so it will update if the key exists or add if it doesn't.
+ * @param {string} storeName The name of the object store.
+ * @param {object[]} items The array of items to add or update.
+ * @returns {Promise<void>} A promise that resolves when all items have been processed.
+ */
+async function bulkPutItems(storeName, items) {
+    if (!items || items.length === 0) {
+        return Promise.resolve();
+    }
+    const currentDb = await initDB();
+    return new Promise((resolve, reject) => {
+        const transaction = currentDb.transaction(storeName, 'readwrite');
+        const store = transaction.objectStore(storeName);
+        let itemsProcessed = 0;
+
+        items.forEach(item => {
+            const request = store.put(item);
+            request.onsuccess = () => {
+                itemsProcessed++;
+                if (itemsProcessed === items.length) {
+                    // All items are processed
+                }
+            };
+            request.onerror = (event) => {
+                // Don't abort the whole transaction on a single item error.
+                // Log the error and continue.
+                console.error(`Error putting item in bulk operation for store ${storeName}:`, item, event.target.error);
+                // If one fails, we should ideally roll back or provide feedback.
+                // For now, we'll let other successful puts go through unless transaction aborts.
+                // To ensure all-or-nothing, the transaction.abort() would be called here,
+                // and the promise rejected immediately.
+                // However, the current loop structure doesn't lend itself well to aborting
+                // after the first error without more complex tracking.
+                // Let's keep it simple and log, relying on transaction's default behavior for now.
+            };
+        });
+
+        transaction.oncomplete = () => {
+            console.log(`Bulk operation: Successfully processed ${items.length} items for store ${storeName}.`);
+            resolve();
+        };
+        transaction.onerror = (event) => {
+            console.error(`Error in bulk put transaction for store ${storeName}:`, event.target.error);
+            reject(`Bulk put transaction error for ${storeName}: ${event.target.error}`);
         };
     });
 }
@@ -249,6 +324,7 @@ window.indexedDBManager = {
     deleteItem,
     getItemsByIndex,
     clearStore,
+    bulkPutItems, // Added bulkPutItems
     STORE_NAMES
 };
 
