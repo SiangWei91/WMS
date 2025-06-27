@@ -163,6 +163,50 @@ const inventoryAPI_module = { // Renamed to avoid conflict if script loaded mult
             inventoryListenerUnsubscribe = null;
             console.log("Real-time listener for inventory detached.");
         }
+    },
+
+    async getBatchDetailsForProduct(productCode, warehouseId) {
+        if (!window.db) {
+            console.error("Firestore 'db' instance is not available.");
+            throw new Error("Firestore is not initialized.");
+        }
+        if (!productCode || !warehouseId) {
+            console.error("getBatchDetailsForProduct: productCode and warehouseId are required.");
+            throw new Error("Product code and warehouse ID are required.");
+        }
+
+        try {
+            console.log(`[inventoryAPI.getBatchDetailsForProduct] Fetching batch details for productCode: ${productCode}, warehouseId: ${warehouseId}`);
+            const snapshot = await window.db.collection('inventory') // Using 'inventory' as the collection name
+                .where('productCode', '==', productCode)
+                .where('warehouseId', '==', warehouseId)
+                .where('quantity', '>', 0) // Only include batches with available stock
+                .get();
+
+            if (snapshot.empty) {
+                console.log(`[inventoryAPI.getBatchDetailsForProduct] No matching batch details found for productCode: ${productCode}, warehouseId: ${warehouseId}`);
+                return [];
+            }
+
+            const batchDetails = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id, // Firestore document ID, might be useful
+                    batchNo: data.batchNo,
+                    quantity: data.quantity,
+                    // Include other fields if they might be relevant for display or logic in the modal
+                    // e.g., container: data.container, expiryDate: data.expiryDate (if exists)
+                    ...(data._3plDetails && { _3plDetails: data._3plDetails }), // if _3plDetails exists
+                    ...(data.container && { container: data.container }),
+                    ...(data.dateStored && { dateStored: data.dateStored }), // Example: if you have an expiry date or date stored
+                };
+            });
+            console.log(`[inventoryAPI.getBatchDetailsForProduct] Found ${batchDetails.length} batch(es):`, batchDetails);
+            return batchDetails;
+        } catch (error) {
+            console.error(`[inventoryAPI.getBatchDetailsForProduct] Error fetching batch details for productCode ${productCode}, warehouseId ${warehouseId}:`, error);
+            throw error; // Re-throw the error to be caught by the caller
+        }
     }
 };
 
