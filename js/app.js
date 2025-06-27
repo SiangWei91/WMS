@@ -15,6 +15,8 @@ const NAV_ITEM_SINGLONG_HTML = `
         <span>Sing Long</span>
     </li>`;
 
+let sidebarToggleListenerAttached = false; // Flag to track listener attachment
+
 // Debounce function
 function debounce(func, wait) {
     let timeout;
@@ -29,7 +31,16 @@ function debounce(func, wait) {
 }
 
 // 主应用逻辑
+let mainContentArea = null; // Cache for the main content DOM element
+
 document.addEventListener('DOMContentLoaded', function () {
+  mainContentArea = document.getElementById('content');
+  if (!mainContentArea) {
+      console.error("CRITICAL: Main content area '#content' not found on DOMContentLoaded. Application might not function correctly.");
+      // Potentially halt further execution or show a global error
+      return; 
+  }
+
   // Firebase Auth State Change Listener
   firebase.auth().onAuthStateChanged(async user => { 
       if (user) {
@@ -50,10 +61,11 @@ document.addEventListener('DOMContentLoaded', function () {
           const sidebar = document.querySelector('.sidebar');
           const sidebarToggle = document.querySelector('.sidebar-toggle');
           
-          if (sidebarToggle && sidebar) { 
+          if (sidebarToggle && sidebar && !sidebarToggleListenerAttached) { 
             sidebarToggle.addEventListener('click', function () {
               sidebar.classList.toggle('sidebar-collapsed');
             });
+            sidebarToggleListenerAttached = true; // Set flag after attaching
           }
 
           initNavigation(); 
@@ -324,70 +336,133 @@ function initNavigation() {
 }
 
 function loadPage(page) {
-  const content = document.getElementById('content');
-  if (!content) {
-      console.error("Main content area not found.");
+  // Use cached mainContentArea
+  if (!mainContentArea) { 
+      console.error("Main content area cache is not initialized.");
       return;
   }
-  if (!page) return; 
+  if (!page) {
+      mainContentArea.innerHTML = '<p>Please select a page.</p>'; // Handle case where page is undefined
+      return;
+  }
+
+  // Clear content area and show a more structured loading indicator
+  mainContentArea.innerHTML = '<div class="loading-indicator" style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin fa-2x"></i><p>Loading...</p></div>'; 
 
   switch (page) {
-    case 'dashboard': loadDashboard(); break;
+    case 'dashboard': 
+        loadDashboard(); 
+        break;
     case 'products': 
-        if (typeof loadProducts === 'function') loadProducts(); 
-        else console.error("loadProducts function is not defined.");
+        import('./products.js')
+            .then(module => {
+                if (module.loadProducts && typeof module.loadProducts === 'function') {
+                    module.loadProducts(mainContentArea); // Pass content area if needed by module
+                } else {
+                    console.error("loadProducts function not found in products.js module.");
+                    mainContentArea.innerHTML = '<p style="color: red;">Error: Could not load products page components.</p>';
+                }
+            })
+            .catch(error => {
+                console.error('Failed to load products.js module:', error);
+                mainContentArea.innerHTML = `<p style="color: red;">Error loading products page: ${error}.</p>`;
+            });
         break;
     case 'inventory': 
-        if (typeof loadInventory === 'function') loadInventory();
-        else console.error("loadInventory function is not defined.");
+        import('./inventory.js')
+            .then(module => {
+                if (module.loadInventory && typeof module.loadInventory === 'function') {
+                    module.loadInventory(mainContentArea); // Pass content area
+                } else {
+                    console.error("loadInventory function not found in inventory.js module.");
+                    mainContentArea.innerHTML = '<p style="color: red;">Error: Could not load inventory page components.</p>';
+                }
+            })
+            .catch(error => {
+                console.error('Failed to load inventory.js module:', error);
+                mainContentArea.innerHTML = `<p style="color: red;">Error loading inventory page: ${error}.</p>`;
+            });
         break;
     case 'transactions': 
-        if (typeof loadTransactions === 'function') loadTransactions();
-        else console.error("loadTransactions function is not defined.");
+        import('./transactions.js')
+            .then(module => {
+                if (module.loadTransactions && typeof module.loadTransactions === 'function') {
+                    module.loadTransactions(mainContentArea); // Pass content area
+                } else {
+                    console.error("loadTransactions function not found in transactions.js module.");
+                    mainContentArea.innerHTML = '<p style="color: red;">Error: Could not load transactions page components.</p>';
+                }
+            })
+            .catch(error => {
+                console.error('Failed to load transactions.js module:', error);
+                mainContentArea.innerHTML = `<p style="color: red;">Error loading transactions page: ${error}.</p>`;
+            });
         break;
     case 'inbound': loadInboundForm(); break;
     case 'outbound': loadOutboundForm(); break;
     case 'shipment':
         fetch('shipment.html')
-          .then(response => response.ok ? response.text() : Promise.reject(response.statusText))
-          .then(html => {
-            content.innerHTML = html;
-            if (typeof initializeShipmentFeature === 'function') initializeShipmentFeature();
-            else content.innerHTML = '<p style="color: red;">Error: Shipment components failed to load.</p>';
-          })
-          .catch(error => {
-            console.error('Failed to load shipment page:', error);
-            content.innerHTML = `<p style="color: red;">Failed to load shipment page: ${error}.</p>`;
-          });
-      break;
-    case 'jordon': loadJordonPage(); break;
-    case 'lineage': content.innerHTML = '<h1>Lineage (Coming Soon)</h1>'; break;
-    case 'singlong': content.innerHTML = '<h1>Sing Long (Coming Soon)</h1>'; break;
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                return response.text();
+            })
+            .then(html => {
+                mainContentArea.innerHTML = html;
+                return import('./shipment.js'); // Dynamically import JS module
+            })
+            .then(module => {
+                if (module.initializeShipmentFeature && typeof module.initializeShipmentFeature === 'function') {
+                    module.initializeShipmentFeature(mainContentArea); // Pass content area
+                } else {
+                    console.error("initializeShipmentFeature function not found in shipment.js module.");
+                }
+            })
+            .catch(error => {
+                console.error('Failed to load shipment page or module:', error);
+                mainContentArea.innerHTML = `<p style="color: red;">Failed to load shipment page: ${error}.</p>`;
+            });
+        break;
+    case 'jordon': loadJordonPage(); break; 
+    case 'lineage': mainContentArea.innerHTML = '<h1>Lineage (Coming Soon)</h1>'; break;
+    case 'singlong': mainContentArea.innerHTML = '<h1>Sing Long (Coming Soon)</h1>'; break;
     default: loadDashboard();
   }
 }
 
 async function loadJordonPage() {
-    const content = document.getElementById('content');
-    if(!content) return;
+    // Use cached mainContentArea
+    if(!mainContentArea) return;
     try {
         const response = await fetch('jordon.html');
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         content.innerHTML = await response.text();
-        setTimeout(() => { // Ensure DOM is updated
-            if (typeof initJordonTabs === 'function') initJordonTabs(content);
-            else console.error('initJordonTabs function not found.');
-        }, 0);
+        // Dynamically import jordon.js and initialize
+        import('./jordon.js')
+            .then(module => {
+                if (module.initJordonPage && typeof module.initJordonPage === 'function') {
+                    module.initJordonPage(content); // Assuming initJordonPage is the new main function in jordon.js
+                } else if (typeof initJordonTabs === 'function') { // Fallback for older structure if needed
+                    console.warn("initJordonPage not found in jordon.js, falling back to global initJordonTabs (if available). Consider exporting initJordonPage from jordon.js.");
+                    initJordonTabs(content); 
+                }
+                else {
+                    console.error("initJordonPage (or initJordonTabs) function not found in jordon.js module or globally.");
+                }
+            })
+            .catch(error => {
+                console.error('Failed to load jordon.js module:', error);
+                // HTML is loaded, but JS might have failed.
+            });
     } catch (error) {
-        console.error('Failed to load Jordon page:', error);
+        console.error('Failed to load Jordon page HTML:', error);
         content.innerHTML = '<h1>Error loading Jordon page</h1>';
     }
 }
 
 async function loadDashboard() {
-    const content = document.getElementById('content');
-    if(!content) return;
-    content.innerHTML = `
+    // Use cached mainContentArea
+    if(!mainContentArea) return;
+    mainContentArea.innerHTML = `
       <div class="dashboard">
           <h1>Welcome to Li Chuan Inventory Management System</h1>
           <div class="stats">
@@ -418,9 +493,9 @@ async function loadDashboard() {
 }
 
 function loadInboundForm() {
-    const content = document.getElementById('content');
-    if(!content) return;
-    content.innerHTML = `
+    // Use cached mainContentArea
+    if(!mainContentArea) return;
+    mainContentArea.innerHTML = `
       <div class="form-container">
           <h1>Inbound</h1>
           <form id="inbound-form">
@@ -471,9 +546,9 @@ async function handleInboundSubmit(e) {
 }
 
 function loadOutboundForm() {
-    const content = document.getElementById('content');
-    if(!content) return;
-    content.innerHTML = `
+    // Use cached mainContentArea
+    if(!mainContentArea) return;
+    mainContentArea.innerHTML = `
       <div class="form-container">
           <h1>Out Bound</h1>
           <form id="outbound-form">
@@ -519,22 +594,5 @@ async function handleOutboundSubmit(e) {
     }
 }
 
-// Fallbacks for potentially undefined load functions (should be defined in their respective JS files)
-if (typeof loadProducts === 'undefined') {
-  window.loadProducts = function() { 
-    const c = document.getElementById('content'); if(c) c.innerHTML = '<h1>Products (Load Function Missing)</h1>'; 
-    console.warn('loadProducts definition missing.'); 
-  }
-}
-if (typeof loadInventory === 'undefined') {
-  window.loadInventory = function() { 
-    const c = document.getElementById('content'); if(c) c.innerHTML = '<h1>Inventory (Load Function Missing)</h1>';
-    console.warn('loadInventory definition missing.'); 
-  }
-}
-if (typeof loadTransactions === 'undefined') {
-  window.loadTransactions = function () { 
-    const c = document.getElementById('content'); if(c) c.innerHTML = '<h1>Transactions (Load Function Missing)</h1>';
-    console.warn('loadTransactions definition missing.'); 
-  };
-}
+// Note: Fallbacks for loadProducts, loadInventory, loadTransactions previously here
+// are removed as these are now handled by dynamic imports in loadPage.
