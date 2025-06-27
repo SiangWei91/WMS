@@ -1147,7 +1147,7 @@ function activateJordonTab(tabElement) {
     }
 }
 
-async function initJordonTabs(containerElement) { 
+export async function initJordonTabs(containerElement) { 
     await loadWarehouseData(); // Load warehouse data first
     console.log("Initializing Jordon tabs and stock-in functionality.");
 
