@@ -267,7 +267,57 @@ function displayExtractedData(data) {
             html += `<td><button class="remove-row-btn" data-row-index="${rowIndex}">X</button></td>`;
             html += '</tr>';
         });
-        html += '</tbody></table>';
+        html += '</tbody>';
+
+        // Calculate totals
+        let totalQuantity = 0;
+        let totalPallets = 0;
+
+        data.forEach(item => {
+            totalQuantity += parseFloat(item.quantity || 0);
+            if (activeViewName === 'Jordon' && item.pallet !== undefined) {
+                totalPallets += parseFloat(item.pallet || 0);
+            }
+        });
+
+        html += '<tfoot><tr>';
+
+        const quantityColIdx = currentDataKeys.indexOf('quantity');
+        const palletColIdx = activeViewName === 'Jordon' ? currentDataKeys.indexOf('pallet') : -1;
+
+        // Create an array for footer cells, initialize with empty strings
+        const footerCells = new Array(currentDataKeys.length + 1).fill('<td></td>'); // +1 for the remove column
+
+        if (quantityColIdx !== -1) {
+            footerCells[quantityColIdx] = `<td><strong>Total Quantity:</strong></td>`;
+            if (quantityColIdx + 1 < footerCells.length) { // Ensure space for value
+                 footerCells[quantityColIdx + 1] = `<td><strong>${totalQuantity.toLocaleString()}</strong></td>`;
+            } else { // Should not happen if table structure is as expected
+                 footerCells[quantityColIdx] = `<td><strong>Total Quantity: ${totalQuantity.toLocaleString()}</strong></td>`;
+            }
+        }
+
+        if (palletColIdx !== -1) { // Jordon view and pallet column exists
+            // If pallet total would overwrite quantity total or its value, adjust (this check is a safeguard)
+            if (footerCells[palletColIdx] === '<td></td>') { // Only fill if cell is empty
+                footerCells[palletColIdx] = `<td><strong>Total Pallets:</strong></td>`;
+            } else { // If not empty (e.g. quantity label was here), shift or log warning
+                // This case implies an unusual column overlap; for now, we prioritize not overwriting.
+                // A more complex layout might need different handling or smarter cell merging.
+                console.warn("Potential overlap in footer for Pallet total. Adjust column order or footer logic if layout is incorrect.");
+            }
+
+            if (palletColIdx + 1 < footerCells.length) {
+                 if (footerCells[palletColIdx+1] === '<td></td>') { // Only fill if cell is empty
+                    footerCells[palletColIdx + 1] = `<td><strong>${totalPallets.toLocaleString()}</strong></td>`;
+                 }
+            } else if (footerCells[palletColIdx].includes("Total Pallets")) { // If label was set but no space for value
+                 footerCells[palletColIdx] = `<td><strong>Total Pallets: ${totalPallets.toLocaleString()}</strong></td>`;
+            }
+        }
+        
+        html += footerCells.join('');
+        html += '</tr></tfoot></table>';
     }
     resultsEl.innerHTML = html;
 }
@@ -393,6 +443,39 @@ async function _processShipmentDataOnline(allExtractedData, containerNumber, sto
 async function handleUpdateInventoryClick() {
     const btn = shipmentModuleState.updateInventoryBtn;
     const resultsEl = shipmentModuleState.currentResultsContainer;
+
+    // Validate for blank item codes
+    let firstBlankItemCodeView = null;
+    let blankItemCodeFound = false;
+    for (const viewName in shipmentModuleState.allExtractedData) {
+        const dataForView = shipmentModuleState.allExtractedData[viewName];
+        if (dataForView && dataForView.some(item => !(item.itemCode && String(item.itemCode).trim()))) {
+            blankItemCodeFound = true;
+            firstBlankItemCodeView = shipmentModuleState.viewDefinitions.find(v => v.name === viewName)?.displayName || viewName;
+            break;
+        }
+    }
+
+    if (blankItemCodeFound) {
+        const message = `Error: One or more items in the '${firstBlankItemCodeView}' view (and possibly others) have a blank Item Code. Please correct this before updating inventory.`;
+        if (resultsEl) {
+            // resultsEl.innerHTML = `<p style="color: red;">${message}</p>`;
+             // It's better to use alert for such critical validation errors to ensure user sees it,
+             // and then restore the current view.
+             alert(message);
+             // Restore the currently active view's display
+            const activeViewName = getActiveViewName();
+            if (activeViewName && shipmentModuleState.allExtractedData[activeViewName]) {
+                displayExtractedData(shipmentModuleState.allExtractedData[activeViewName]);
+            } else { // Fallback if no active view or data, though unlikely if we found blank items
+                resultsEl.innerHTML = '<p>Upload an Excel file (.xlsx or .xlsm) to see results.</p>';
+            }
+        } else {
+            alert(message); // Fallback alert if resultsEl is somehow not available
+        }
+        if (btn) btn.disabled = false; // Re-enable the button
+        return; // Stop processing
+    }
   
     if (btn) btn.disabled = true;
     if (resultsEl) resultsEl.innerHTML = `<p>Processing shipment... Please wait.</p>`;
