@@ -272,6 +272,10 @@ document.addEventListener('DOMContentLoaded', function () {
   if (dropdownClearFirestoreButton) {
     dropdownClearFirestoreButton.addEventListener('click', async function(event) {
       event.preventDefault();
+      if (typeof window.clearAllPageMessages === 'function') {
+        window.clearAllPageMessages();
+      }
+
       const avatarDropdown = document.getElementById('avatar-dropdown');
       if (avatarDropdown) {
         avatarDropdown.classList.remove('show');
@@ -341,11 +345,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
         } catch (error) {
           console.error('Error during clear Firestore collections or IndexedDB stores:', error);
-          alert('An unexpected error occurred while clearing data. Check the console.');
+          if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage('An unexpected error occurred while clearing data. Check the console.', 'error');
+          } else {
+            alert('An unexpected error occurred while clearing data. Check the console.');
+          }
         }
       } else {
         console.error('firestoreAdminAPI.clearFirestoreCollections is not available.');
-        alert('Error: Clear collections functionality is not loaded correctly.');
+        if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage('Error: Clear collections functionality is not loaded correctly.', 'error');
+        } else {
+            alert('Error: Clear collections functionality is not loaded correctly.');
+        }
       }
     });
   }
