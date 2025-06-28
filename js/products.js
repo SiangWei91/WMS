@@ -9,11 +9,14 @@ let totalNumPages = 1;
 let totalNumItems = 0;
 let globalHasNextPage = false;
 
-export async function loadProducts(contentElement) { // Added export, accept contentElement
-    const content = contentElement || document.getElementById('content'); // Use passed element or fallback
+export async function loadProducts(contentElement) { 
+    const content = contentElement || document.getElementById('content'); 
     if (!content) {
         console.error("Content element not found. Cannot load products page.");
         return;
+    }
+    if (typeof window.clearAllPageMessages === 'function') {
+        window.clearAllPageMessages();
     }
     content.innerHTML = `
         <div class="products">
@@ -41,11 +44,9 @@ export async function loadProducts(contentElement) { // Added export, accept con
                         </tr>
                     </thead>
                     <tbody id="products-table-body">
-                        <!-- Product data will be dynamically loaded here -->
                     </tbody>
                 </table>
                 <div class="pagination" id="pagination">
-                    <!-- Pagination controls will be dynamically loaded here -->
                 </div>
             </div>
         </div>
@@ -53,7 +54,7 @@ export async function loadProducts(contentElement) { // Added export, accept con
 
     const addProductBtn = document.getElementById('add-product-btn');
     if (addProductBtn) {
-        addProductBtn.addEventListener('click', () => loadAddProductForm(content)); // Pass content
+        addProductBtn.addEventListener('click', () => loadAddProductForm(content)); 
     }
     
     const productSearchInput = document.getElementById('product-search');
@@ -227,9 +228,12 @@ function handleProductSearch(e) {
     fetchProducts({ searchTerm: currentProductSearchTerm, limit: PRODUCTS_PER_PAGE, page: currentPageNum });
 }
 
-function loadAddProductForm(contentElement) { // Accept contentElement
+function loadAddProductForm(contentElement) { 
     const content = contentElement || document.getElementById('content');
      if (!content) return;
+    if (typeof window.clearAllPageMessages === 'function') {
+        window.clearAllPageMessages();
+    }
     content.innerHTML = `
         <div class="form-container">
             <h1>Add Product</h1>
@@ -254,14 +258,17 @@ function loadAddProductForm(contentElement) { // Accept contentElement
         </div>
     `;
     const cancelBtn = document.getElementById('cancel-btn');
-    if(cancelBtn) cancelBtn.addEventListener('click', () => { currentProductSearchTerm = ''; currentPageNum = 1; loadProducts(content); }); // Pass content
+    if(cancelBtn) cancelBtn.addEventListener('click', () => { currentProductSearchTerm = ''; currentPageNum = 1; loadProducts(content); }); 
     
     const productForm = document.getElementById('product-form');
-    if(productForm) productForm.addEventListener('submit', (e) => handleAddProduct(e, content)); // Pass content
+    if(productForm) productForm.addEventListener('submit', (e) => handleAddProduct(e, content)); 
 }
 
-async function handleAddProduct(e, contentElement) { // Accept contentElement
+async function handleAddProduct(e, contentElement) { 
     e.preventDefault();
+    if (typeof window.clearAllPageMessages === 'function') {
+        window.clearAllPageMessages();
+    }
     const form = e.target;
     const productData = {
         productCode: form.productCode.value,
@@ -272,17 +279,28 @@ async function handleAddProduct(e, contentElement) { // Accept contentElement
     try {
         if (!window.productAPI || typeof window.productAPI.addProduct !== 'function') throw new Error("productAPI.addProduct is not available.");
         await window.productAPI.addProduct(productData);
-        alert('产品添加成功!');
+        if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage('产品添加成功!', 'success', 3000);
+        } else {
+            alert('产品添加成功!');
+        }
         currentProductSearchTerm = ''; 
         currentPageNum = 1; 
-        loadProducts(contentElement); // Pass contentElement
+        loadProducts(contentElement); 
     } catch (error) {
         console.error('添加产品失败:', error);
-        alert('添加产品失败: ' + error.message);
+        if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage('添加产品失败: ' + error.message, 'error');
+        } else {
+            alert('添加产品失败: ' + error.message);
+        }
     }
 }
 
 async function viewProduct(productId) {
+    if (typeof window.clearAllPageMessages === 'function') {
+        window.clearAllPageMessages();
+    }
     try {
         if (!window.productAPI || typeof window.productAPI.getProductById !== 'function') throw new Error("productAPI.getProductById is not available.");
         const product = await window.productAPI.getProductById(productId);
@@ -291,19 +309,35 @@ async function viewProduct(productId) {
             if (product.createdAt) {
                 try { createdAtString = new Date(product.createdAt).toLocaleString(); } catch (e) { console.warn("Error parsing createdAt for view", e); }
             }
-            const chineseNameDisplay = product['Chinese Name'] ? `\nChinese Name: ${escapeHtml(product['Chinese Name'])}` : '';
-            alert(`Product Details:\nID: ${escapeHtml(product.id)}\nCode: ${escapeHtml(product.productCode)}\nName: ${escapeHtml(product.name)}${chineseNameDisplay}\nPackaging: ${escapeHtml(product.packaging)}\nCreated At: ${escapeHtml(createdAtString)}`);
+            const chineseNameDisplay = product['Chinese Name'] ? `<br>Chinese Name: ${escapeHtml(product['Chinese Name'])}` : '';
+            const message = `Product Details:<br>ID: ${escapeHtml(product.id)}<br>Code: ${escapeHtml(product.productCode)}<br>Name: ${escapeHtml(product.name)}${chineseNameDisplay}<br>Packaging: ${escapeHtml(product.packaging)}<br>Created At: ${escapeHtml(createdAtString)}`;
+            if (typeof window.displayPageMessage === 'function') {
+                window.displayPageMessage(message, 'info');
+            } else {
+                alert(message.replace(/<br>/g, '\n'));
+            }
         } else {
-            alert('Product not found.');
+            if (typeof window.displayPageMessage === 'function') {
+                window.displayPageMessage('Product not found.', 'warning');
+            } else {
+                alert('Product not found.');
+            }
         }
     } catch (error) {
         console.error('Failed to view product:', error);
-        alert('Failed to view product: ' + error.message);
+        if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage('Failed to view product: ' + error.message, 'error');
+        } else {
+            alert('Failed to view product: ' + error.message);
+        }
     }
 }
 
-async function editProduct(productId) { // Assuming this might be called when products.js is already loaded
-    const content = document.getElementById('content'); // Keep using ID here or pass mainContentArea if refactoring app.js more
+async function editProduct(productId) { 
+    const content = document.getElementById('content'); 
+    if (typeof window.clearAllPageMessages === 'function') {
+        window.clearAllPageMessages();
+    }
     try {
         if (!window.productAPI || typeof window.productAPI.getProductById !== 'function') throw new Error("productAPI.getProductById is not available.");
         const product = await window.productAPI.getProductById(productId);
@@ -337,39 +371,61 @@ async function editProduct(productId) { // Assuming this might be called when pr
                 </div>
             `;
             const cancelEditBtn = document.getElementById('cancel-edit-product-btn');
-            if(cancelEditBtn) cancelEditBtn.addEventListener('click', () => { currentPageNum = 1; loadProducts(content); }); // Pass content
+            if(cancelEditBtn) cancelEditBtn.addEventListener('click', () => { currentPageNum = 1; loadProducts(content); }); 
             
             const editForm = document.getElementById('edit-product-form');
-            if(editForm) editForm.addEventListener('submit', (e) => handleUpdateProduct(e, content)); // Pass content
+            if(editForm) editForm.addEventListener('submit', (e) => handleUpdateProduct(e, content)); 
 
         } else {
-            alert('Product not found for editing.');
+            if (typeof window.displayPageMessage === 'function') {
+                window.displayPageMessage('Product not found for editing.', 'error');
+            } else {
+                alert('Product not found for editing.');
+            }
             currentPageNum = 1;
-            loadProducts(content); // Pass content
+            loadProducts(content); 
         }
     } catch (error) {
         console.error('Failed to fetch product for editing:', error);
-        alert('Failed to fetch product for editing: ' + error.message);
+        if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage('Failed to fetch product for editing: ' + error.message, 'error');
+        } else {
+            alert('Failed to fetch product for editing: ' + error.message);
+        }
     }
 }
 
-async function deleteProduct(productId) { // Assuming this is called when products.js is loaded
-    const content = document.getElementById('content'); // Or pass mainContentArea
+async function deleteProduct(productId) { 
+    const content = document.getElementById('content'); 
+    if (typeof window.clearAllPageMessages === 'function') {
+        window.clearAllPageMessages();
+    }
     if (confirm(`Are you sure you want to delete this product (ID: ${escapeHtml(productId)})?`)) {
         try {
             if (!window.productAPI || typeof window.productAPI.deleteProduct !== 'function') throw new Error("productAPI.deleteProduct is not available.");
             await window.productAPI.deleteProduct(productId);
-            alert('Product deleted successfully!');
-            loadProducts(content); // Pass content
+            if (typeof window.displayPageMessage === 'function') {
+                window.displayPageMessage('Product deleted successfully!', 'success', 3000);
+            } else {
+                alert('Product deleted successfully!');
+            }
+            loadProducts(content); 
         } catch (error) {
             console.error('Failed to delete product:', error);
-            alert('Failed to delete product: ' + error.message);
+            if (typeof window.displayPageMessage === 'function') {
+                window.displayPageMessage('Failed to delete product: ' + error.message, 'error');
+            } else {
+                alert('Failed to delete product: ' + error.message);
+            }
         }
     }
 }
 
-async function handleUpdateProduct(e, contentElement) { // Accept contentElement
+async function handleUpdateProduct(e, contentElement) { 
     e.preventDefault();
+    if (typeof window.clearAllPageMessages === 'function') {
+        window.clearAllPageMessages();
+    }
     const form = e.target;
     const productId = form.dataset.productId;
     
@@ -381,7 +437,12 @@ async function handleUpdateProduct(e, contentElement) { // Accept contentElement
     };
 
     if (!updatedProductData.productCode || !updatedProductData.name || !updatedProductData.packaging) {
-        alert('Product Code, Product Description, and Packing Size are required.');
+        const msg = 'Product Code, Product Description, and Packing Size are required.';
+        if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage(msg, 'error');
+        } else {
+            alert(msg);
+        }
         return;
     }
 
@@ -393,11 +454,19 @@ async function handleUpdateProduct(e, contentElement) { // Accept contentElement
         }
         if (!window.productAPI || typeof window.productAPI.updateProduct !== 'function') throw new Error("productAPI.updateProduct is not available.");
         await window.productAPI.updateProduct(productId, updatedProductData);
-        alert('Product updated successfully!');
-        loadProducts(contentElement); // Pass contentElement
+        if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage('Product updated successfully!', 'success', 3000);
+        } else {
+            alert('Product updated successfully!');
+        }
+        loadProducts(contentElement); 
     } catch (error) {
         console.error('Failed to update product:', error);
-        alert('Failed to update product: ' + error.message);
+        if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage('Failed to update product: ' + error.message, 'error');
+        } else {
+            alert('Failed to update product: ' + error.message);
+        }
     } finally {
         if (saveButton) {
             saveButton.disabled = false;
