@@ -61,9 +61,10 @@
 }
 
 #resultsContainer table {
-  width: 100%;
+  width: 100%; /* Or consider `max-width: 100%; display: block; overflow-x: auto;` for very wide tables */
   border-collapse: collapse;
   margin-top: 15px;
+  table-layout: auto; /* Explicitly set for content-based column widths */
 }
 
 #resultsContainer th,
@@ -73,6 +74,8 @@
   text-align: left;
   font-size: 0.9em;
   position: relative; 
+  overflow-wrap: break-word; /* Helps wrap long strings to prevent layout breaking */
+  /* Consider `word-break: break-all;` if `break-word` is not sufficient for some content */
 }
 
 #resultsContainer th {
