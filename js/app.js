@@ -1,3 +1,4 @@
+import { initializeReadCounter } from './firebaseReadCounter.js'; // Added import
 // Imports for page-specific loading functions
 import { loadProducts } from './products.js';
 import { loadInventory } from './inventory.js';
@@ -41,6 +42,8 @@ function debounce(func, wait) {
 let mainContentArea = null; // Cache for the main content DOM element
 
 document.addEventListener('DOMContentLoaded', function () {
+  initializeReadCounter(); // Initialize the counter and display
+
   mainContentArea = document.getElementById('content');
   if (!mainContentArea) {
       console.error("CRITICAL: Main content area '#content' not found on DOMContentLoaded. Application might not function correctly.");
