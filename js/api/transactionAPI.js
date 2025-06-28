@@ -1,5 +1,6 @@
 // Depends on: helpers.js (ensureDbManager, areObjectsShallowEqual)
 // Depends on: listeners.js (transactionListenerUnsubscribe)
+import { incrementReadCount } from '../firebaseReadCounter.js';
 
 const transactionAPI_module = { // Renamed for clarity
     async getTransactions(params = {}) {
@@ -15,6 +16,7 @@ const transactionAPI_module = { // Renamed for clarity
                 console.log("Transactions store not found, fetching from Firestore...");
                 if (!window.db) throw new Error("Firestore 'db' instance is not available.");
                 const firestoreSnapshot = await window.db.collection('transactions').orderBy('transactionDate', 'desc').get();
+                incrementReadCount(firestoreSnapshot.docs.length || 1); // Count reads
                 const firestoreTransactions = firestoreSnapshot.docs.map(doc => {
                     const txData = doc.data();
                     if (txData.transactionDate && txData.transactionDate.toDate) {
@@ -233,6 +235,7 @@ const transactionAPI_module = { // Renamed for clarity
         const db = firebase.firestore(); 
         return db.runTransaction(async (transaction) => {
             const inventoryDoc = await transaction.get(inventoryDocRef);
+            incrementReadCount(1); // Count the read within the transaction
             if (!inventoryDoc.exists) throw new Error(`Inventory item with ID ${data.inventoryId} not found.`);
             const currentItemData = inventoryDoc.data();
             const currentQuantity = currentItemData.quantity;
@@ -285,6 +288,7 @@ const transactionAPI_module = { // Renamed for clarity
             transactionListenerUnsubscribe = window.db.collection('transactions')
                 .orderBy('transactionDate', 'desc') 
                 .onSnapshot(async (querySnapshot) => {
+                    incrementReadCount(querySnapshot.docs.length || 1); // Count reads for snapshot delivery
                     await ensureDbManager(); 
                     const changes = querySnapshot.docChanges();
                     let itemsToUpdate = [];
