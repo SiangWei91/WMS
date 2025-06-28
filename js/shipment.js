@@ -364,6 +364,7 @@ async function _processShipmentDataOnline(allExtractedData, containerNumber, sto
                 batch.set(newInventoryDocRef, inventoryDoc);
                 totalItemsToUpdate++;
 
+                const operatorName = sessionStorage.getItem('loggedInUser') || 'system_excel_import';
                 const transactionDoc = {
                     productId: productInfo.productId || null, 
                     productCode: inventoryDoc.productCode,
@@ -372,7 +373,7 @@ async function _processShipmentDataOnline(allExtractedData, containerNumber, sto
                     quantity: inventoryDoc.quantity,
                     batchNo: inventoryDoc.batchNo,
                     transactionDate: firebase.firestore.FieldValue.serverTimestamp(),
-                    type: 'inbound', operatorId: 'system_excel_import', 
+                    type: 'inbound', operatorId: operatorName, 
                 };
                 const newTransactionDocRef = db.collection('transactions').doc();
                 batch.set(newTransactionDocRef, transactionDoc);
