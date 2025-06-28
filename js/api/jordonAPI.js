@@ -1,4 +1,5 @@
 // Depends on: (none explicitly from helpers.js or listeners.js in current form)
+import { incrementReadCount } from '../firebaseReadCounter.js';
 
 const jordonAPI_module = { // Renamed for clarity
     async addJordonStockItems(itemsArray) {
@@ -39,6 +40,7 @@ const jordonAPI_module = { // Renamed for clarity
 
         try {
             const querySnapshot = await query.get();
+            incrementReadCount(querySnapshot.docs.length || 1); // Count reads for the main query
             const items = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             const lastVisibleDoc = querySnapshot.docs.length > 0 ? querySnapshot.docs[querySnapshot.docs.length - 1] : null;
             
@@ -49,6 +51,7 @@ const jordonAPI_module = { // Renamed for clarity
                 // A more scalable approach is often to maintain counters via cloud functions.
                 // If this collection is expected to be very large, this count method should be reconsidered.
                 const countSnapshot = await window.db.collection("jordonInventoryItems").get(); 
+                incrementReadCount(countSnapshot.docs.length || 1); // Count reads for the count query
                 totalItems = countSnapshot.size;
             } catch (countError) {
                 console.warn("Could not fetch total count for Jordon inventory items:", countError);
