@@ -1,5 +1,6 @@
 // Depends on: helpers.js (ensureDbManager, areObjectsShallowEqual)
 // Depends on: listeners.js (shipmentListenerUnsubscribe)
+import { incrementReadCount } from '../firebaseReadCounter.js';
 
 const shipmentAPI_module = { // Renamed for clarity
     async getShipments(params = {}) {
@@ -13,6 +14,7 @@ const shipmentAPI_module = { // Renamed for clarity
                 console.log("Shipments store not found, fetching from Firestore...");
                  if (!window.db) throw new Error("Firestore 'db' instance is not available.");
                 const firestoreSnapshot = await window.db.collection('shipments').orderBy('shipmentDate', 'desc').get();
+                incrementReadCount(firestoreSnapshot.docs.length || 1); // Count reads
                 const firestoreShipments = firestoreSnapshot.docs.map(doc => {
                     const shipmentData = doc.data();
                     if (shipmentData.shipmentDate && shipmentData.shipmentDate.toDate) {
@@ -220,6 +222,7 @@ const shipmentAPI_module = { // Renamed for clarity
             shipmentListenerUnsubscribe = window.db.collection('shipments')
                 .orderBy('createdAt', 'desc') 
                 .onSnapshot(async (querySnapshot) => {
+                    incrementReadCount(querySnapshot.docs.length || 1); // Count reads for snapshot delivery
                     await ensureDbManager(); 
                     const changes = querySnapshot.docChanges();
                     let itemsToUpdate = [];
