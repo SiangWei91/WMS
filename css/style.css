@@ -758,3 +758,32 @@ tr:hover {
 #modal-transactions-content .table {
   margin-bottom: 15px;
 }
+
+/* Floating Action Button Styles */
+#floating-bubble {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  width: 60px;
+  height: 60px;
+  background-color: rgba(52, 152, 219, 0.7); /* Blue with transparency */
+  border-radius: 50%; /* Makes it circular */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  z-index: 1000; /* Ensure it's above most other content */
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.3s ease;
+}
+
+#floating-bubble:hover {
+  background-color: rgba(41, 128, 185, 0.9); /* Darker blue on hover */
+}
+
+/* Styling for the count text inside the bubble */
+#firebase-read-count {
+  font-size: 18px; /* Adjust size as needed */
+  color: white;
+  font-weight: bold;
+}
