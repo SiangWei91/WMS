@@ -1,4 +1,5 @@
 // Depends on: (none explicitly from helpers.js or listeners.js in current form)
+import { incrementReadCount } from '../firebaseReadCounter.js';
 
 const dashboardAPI_module = { // Renamed for clarity
     async getStats() {
@@ -10,6 +11,7 @@ const dashboardAPI_module = { // Renamed for clarity
         let totalProducts = 0, totalInventory = 0, todayTransactions = 0;
         try {
             const productStatsDoc = await window.db.doc('system_stats/productStats').get();
+            incrementReadCount(1); // Count this read
             if (productStatsDoc.exists) {
                 totalProducts = productStatsDoc.data().count || 0;
             } else {
@@ -21,6 +23,7 @@ const dashboardAPI_module = { // Renamed for clarity
         }
         try {
             const inventoryStatsDoc = await window.db.doc('system_stats/inventoryStats').get();
+            incrementReadCount(1); // Count this read
             if (inventoryStatsDoc.exists) {
                 totalInventory = inventoryStatsDoc.data().totalQuantity || 0;
             } else {
@@ -40,6 +43,7 @@ const dashboardAPI_module = { // Renamed for clarity
                                       .where('transactionDate','>=',todayStart)
                                       .where('transactionDate','<=',todayEnd)
                                       .get();
+            incrementReadCount(transSnap.docs.length || 1); // Count reads
             todayTransactions = transSnap.size;
         } catch (e) { 
             console.error("Error fetching today's transactions:", e);
