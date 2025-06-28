@@ -226,8 +226,15 @@ const transactionAPI_module = { // Renamed for clarity
     },
 
     async outboundStockByInventoryId(data) { 
+        if (typeof window.clearAllPageMessages === 'function') {
+            window.clearAllPageMessages();
+        }
         if (!navigator.onLine) {
-            alert("This specific outbound operation is currently not supported offline.");
+            if (typeof window.displayPageMessage === 'function') {
+                window.displayPageMessage("This specific outbound operation is currently not supported offline.", 'error');
+            } else {
+                alert("This specific outbound operation is currently not supported offline.");
+            }
             throw new Error("Operation not supported offline.");
         }
         if (!window.db) throw new Error("Firestore 'db' instance is not available.");
