@@ -8,8 +8,17 @@ import { incrementReadCount } from '../firebaseReadCounter.js';
  * @param {Array<string>} collectionNames Array of collection names to clear.
  */
 async function clearFirestoreCollections(collectionNames) {
+  if (typeof window.clearAllPageMessages === 'function') {
+    window.clearAllPageMessages();
+  }
+
   if (!confirm(`Are you sure you want to delete all data from the following collections?\n\n- ${collectionNames.join("\n- ")}\n\nThis action cannot be undone.`)) {
     console.log('Firestore collection clearing cancelled by user.');
+    if (typeof window.displayPageMessage === 'function') {
+      window.displayPageMessage('Firestore collection clearing cancelled by user.', 'info', 3000);
+    } else {
+      alert('Firestore collection clearing cancelled by user.');
+    }
     return;
   }
 
@@ -58,7 +67,11 @@ async function clearFirestoreCollections(collectionNames) {
 
     } catch (error) {
       console.error(`Error clearing collection ${collectionName}:`, error);
-      alert(`Failed to clear collection ${collectionName}. Check console for details. Error: ${error.message}`);
+      if (typeof window.displayPageMessage === 'function') {
+        window.displayPageMessage(`Failed to clear collection ${collectionName}. Error: ${error.message}`, 'error');
+      } else {
+        alert(`Failed to clear collection ${collectionName}. Check console for details. Error: ${error.message}`);
+      }
       allSucceeded = false;
       // Optionally, decide if you want to stop or continue with other collections
       // For now, it continues.
@@ -66,10 +79,18 @@ async function clearFirestoreCollections(collectionNames) {
   }
 
   if (allSucceeded) {
-    alert('All specified Firestore collections have been cleared successfully!');
+    if (typeof window.displayPageMessage === 'function') {
+      window.displayPageMessage('All specified Firestore collections have been cleared successfully!', 'success', 5000);
+    } else {
+      alert('All specified Firestore collections have been cleared successfully!');
+    }
     console.log('All specified Firestore collections cleared.');
   } else {
-    alert('Some collections could not be cleared completely. Please check the console for errors.');
+    if (typeof window.displayPageMessage === 'function') {
+      window.displayPageMessage('Some collections could not be cleared completely. Please check the console for errors.', 'warning');
+    } else {
+      alert('Some collections could not be cleared completely. Please check the console for errors.');
+    }
     console.warn('One or more collections were not cleared successfully.');
   }
 }
