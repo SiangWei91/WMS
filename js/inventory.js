@@ -316,7 +316,17 @@ function closeProductTransactionsModal() {
 window.closeProductTransactionsModal = closeProductTransactionsModal; 
 
 async function displayProductTransactions(productCode, productName, packaging) {
-    if (!productCode) { alert("Product code is missing."); return; }
+    if (typeof window.clearAllPageMessages === 'function') {
+        // window.clearAllPageMessages(); // Decide if global messages should clear for a modal
+    }
+    if (!productCode) { 
+        if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage("Product code is missing for viewing transactions.", 'error');
+        } else {
+            alert("Product code is missing.");
+        }
+        return; 
+    }
 
     document.getElementById('modal-product-name').textContent = productName || 'N/A';
     document.getElementById('modal-packaging-size').textContent = packaging || 'N/A';
@@ -405,13 +415,20 @@ async function displayProductTransactions(productCode, productName, packaging) {
 let currentTransferData = {}; // To store data for the active transfer
 
 function showInternalTransferMemo(data) {
+    if (typeof window.clearAllPageMessages === 'function') {
+        window.clearAllPageMessages(); 
+    }
     console.log("showInternalTransferMemo called with data:", data);
     currentTransferData = data; // Store for submission
 
     const modal = document.getElementById('internal-transfer-modal');
     if (!modal) {
         console.error("Internal Transfer Modal not found in DOM.");
-        alert("Error: Transfer UI component is missing.");
+        if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage("Error: Transfer UI component is missing. Cannot proceed.", 'error');
+        } else {
+            alert("Error: Transfer UI component is missing.");
+        }
         return;
     }
 
@@ -607,46 +624,45 @@ function closeInternalTransferModal() {
 }
 
 async function handleInternalTransferSubmit() {
+    if (typeof window.clearAllPageMessages === 'function') {
+        window.clearAllPageMessages();
+    }
     const quantityInput = document.getElementById('transfer-quantity');
     const destinationSelect = document.getElementById('transfer-destination-warehouse');
-    const errorMessageDiv = document.getElementById('internal-transfer-error-message');
-    const batchSelect = document.getElementById('transfer-select-batch'); // Get the batch selector
+    const errorMessageDiv = document.getElementById('internal-transfer-error-message'); // This is for modal-internal errors
+    const batchSelect = document.getElementById('transfer-select-batch'); 
 
     const quantityToTransfer = parseInt(quantityInput.value, 10);
     const destinationWarehouseId = destinationSelect.value;
-    const { productCode, productName, packaging, sourceWarehouseId, availableQuantity /*, productId */ } = currentTransferData;
+    const { productCode, productName, packaging, sourceWarehouseId, availableQuantity } = currentTransferData;
     
     let selectedBatchNo = null;
-    let selectedBatchDocId = null; // Variable to store the Firestore document ID of the selected batch
-    let selectedBatchAvailableQty = availableQuantity; // Default to total available if no batch selected
+    let selectedBatchDocId = null; 
+    let selectedBatchAvailableQty = availableQuantity; 
 
     if (batchSelect && batchSelect.value) {
         const selectedOption = batchSelect.options[batchSelect.selectedIndex];
         selectedBatchNo = selectedOption.dataset.batchNo;
-        selectedBatchDocId = selectedOption.dataset.batchId; // Retrieve the batchId (Firestore doc ID)
+        selectedBatchDocId = selectedOption.dataset.batchId; 
         selectedBatchAvailableQty = parseInt(selectedOption.dataset.availableQty, 10);
-    } else if (batchSelect) { // Batch select exists but no batch is chosen
+    } else if (batchSelect) { 
         errorMessageDiv.textContent = 'Please select a batch to transfer from.';
         batchSelect.focus();
         return;
     }
-    // If batchSelect does not exist at all, it means no batches were loaded (e.g. error or no batches found)
-    // In this scenario, we might prevent submission or rely on the old total quantity logic if that's desired as a fallback.
-    // For now, if batch selection was intended (i.e. container was added), a batch MUST be selected.
 
-    errorMessageDiv.textContent = ''; // Clear previous errors
+    errorMessageDiv.textContent = ''; 
 
     if (isNaN(quantityToTransfer) || quantityToTransfer <= 0) {
         errorMessageDiv.textContent = 'Please enter a valid quantity greater than 0.';
         quantityInput.focus();
         return;
     }
-    // Validate against selected batch availability if a batch was selected
     if (batchSelect && batchSelect.value && quantityToTransfer > selectedBatchAvailableQty) {
          errorMessageDiv.textContent = `Quantity to transfer cannot exceed selected batch's available quantity (${selectedBatchAvailableQty}).`;
         quantityInput.focus();
         return;
-    } else if (!batchSelect && quantityToTransfer > availableQuantity) { // Fallback to total if no batch selector involved
+    } else if (!batchSelect && quantityToTransfer > availableQuantity) { 
         errorMessageDiv.textContent = `Quantity to transfer cannot exceed available quantity (${availableQuantity}).`;
         quantityInput.focus();
         return;
@@ -675,8 +691,8 @@ async function handleInternalTransferSubmit() {
         destinationWarehouseId,
         quantity: quantityToTransfer,
         operatorId,
-        batchNo: selectedBatchNo, // This is the product's batch number
-        sourceBatchDocId: selectedBatchDocId // Add the Firestore document ID of the source batch entry
+        batchNo: selectedBatchNo, 
+        sourceBatchDocId: selectedBatchDocId 
     };
 
     console.log("[handleInternalTransferSubmit] Submitting internal transfer with payload:", JSON.parse(JSON.stringify(transferPayload)));
@@ -691,13 +707,22 @@ async function handleInternalTransferSubmit() {
             throw new Error("Internal transfer API function is not available.");
         }
         await window.transactionAPI.performInternalTransfer(transferPayload);
-        alert('Internal transfer submitted successfully!');
+        if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage('Internal transfer submitted successfully!', 'success', 3000);
+        } else {
+            alert('Internal transfer submitted successfully!');
+        }
         closeInternalTransferModal();
         console.log("[handleInternalTransferSubmit] Transfer attempt complete, refreshing inventory view.");
         fetchDataAndDisplayInventory(); 
     } catch (error) {
         console.error("[handleInternalTransferSubmit] Error performing internal transfer:", error);
+        // Display error within the modal first
         errorMessageDiv.textContent = `Transfer Error: ${error.message || 'Unknown error'}`;
+        // Also display a global page message for higher visibility if the modal error isn't noticed
+        if (typeof window.displayPageMessage === 'function') {
+            window.displayPageMessage(`Transfer Error: ${error.message || 'Unknown error'}`, 'error');
+        }
     } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = 'Submit Transfer';
