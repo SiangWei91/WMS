@@ -256,13 +256,23 @@ function displayExtractedData(data) {
         }
         headers.push('Remove');
         html += '<table border="1"><thead><tr>';
-        headers.forEach(h => html += `<th>${escapeHtml(h)}</th>`);
+        headers.forEach(h => {
+            let thClass = '';
+            if (h === 'Product Description') {
+                thClass = ' class="product-description-col"';
+            }
+            html += `<th${thClass}>${escapeHtml(h)}</th>`;
+        });
         html += '</tr></thead><tbody>';
         data.forEach((item, rowIndex) => {
             html += `<tr data-row-index="${rowIndex}">`;
             currentDataKeys.forEach(key => {
                 const value = item[key] !== undefined ? item[key] : '';
-                html += `<td><input type="text" class="editable-cell-input" data-row-index="${rowIndex}" data-column-key="${escapeHtml(key)}" value="${escapeHtml(value)}"></td>`;
+                let tdClass = '';
+                if (key === 'productDescription') {
+                    tdClass = ' class="product-description-col"';
+                }
+                html += `<td${tdClass}><input type="text" class="editable-cell-input" data-row-index="${rowIndex}" data-column-key="${escapeHtml(key)}" value="${escapeHtml(value)}"></td>`;
             });
             html += `<td><button class="remove-row-btn" data-row-index="${rowIndex}">X</button></td>`;
             html += '</tr>';
@@ -286,33 +296,46 @@ function displayExtractedData(data) {
         const palletColIdx = activeViewName === 'Jordon' ? currentDataKeys.indexOf('pallet') : -1;
 
         // Create an array for footer cells, initialize with empty strings
-        const footerCells = new Array(currentDataKeys.length + 1).fill('<td></td>'); // +1 for the remove column
+        const numFooterCells = currentDataKeys.length + 1; // +1 for the remove column placeholder
+        const footerCells = new Array(numFooterCells).fill('<td></td>'); 
 
+        // Place "Total Quantity"
         if (quantityColIdx !== -1) {
-            footerCells[quantityColIdx] = `<td><strong>Total Quantity:</strong></td>`;
-            if (quantityColIdx + 1 < footerCells.length) { // Ensure space for value
-                 footerCells[quantityColIdx + 1] = `<td><strong>${totalQuantity.toLocaleString()}</strong></td>`;
-            } else { // Should not happen if table structure is as expected
-                 footerCells[quantityColIdx] = `<td><strong>Total Quantity: ${totalQuantity.toLocaleString()}</strong></td>`;
+            let qtyLabelPlaced = false;
+            // Try to place label in 'Batch No' column if it exists and is before 'Quantity'
+            const batchNoColIdx = currentDataKeys.indexOf('batchNo');
+            if (batchNoColIdx !== -1 && batchNoColIdx < quantityColIdx) {
+                footerCells[batchNoColIdx] = `<td><strong>Total Quantity:</strong></td>`;
+                qtyLabelPlaced = true;
+            } else if (quantityColIdx > 0) { // Else, try to place label in the cell immediately to the left of 'Quantity'
+                 footerCells[quantityColIdx - 1] = `<td><strong>Total Quantity:</strong></td>`;
+                 qtyLabelPlaced = true;
+            }
+            // Value always goes under the 'Quantity' column header
+            footerCells[quantityColIdx] = `<td><strong>${totalQuantity.toLocaleString()}</strong></td>`;
+            
+            if (!qtyLabelPlaced) { // If 'Quantity' is the first column, combine label and value
+                footerCells[quantityColIdx] = `<td><strong>Total Quantity: ${totalQuantity.toLocaleString()}</strong></td>`;
             }
         }
 
+        // Place "Total Pallets" for Jordon view
         if (palletColIdx !== -1) { // Jordon view and pallet column exists
-            // If pallet total would overwrite quantity total or its value, adjust (this check is a safeguard)
-            if (footerCells[palletColIdx] === '<td></td>') { // Only fill if cell is empty
-                footerCells[palletColIdx] = `<td><strong>Total Pallets:</strong></td>`;
-            } else { // If not empty (e.g. quantity label was here), shift or log warning
-                // This case implies an unusual column overlap; for now, we prioritize not overwriting.
-                // A more complex layout might need different handling or smarter cell merging.
-                console.warn("Potential overlap in footer for Pallet total. Adjust column order or footer logic if layout is incorrect.");
+            let palletLabelPlaced = false;
+            // Try to place label in 'Packing Size' column if it exists, is before 'Pallet', and cell is empty
+            const packingSizeColIdx = currentDataKeys.indexOf('packingSize');
+            if (packingSizeColIdx !== -1 && packingSizeColIdx < palletColIdx && footerCells[packingSizeColIdx] === '<td></td>') {
+                footerCells[packingSizeColIdx] = `<td><strong>Total Pallets:</strong></td>`;
+                palletLabelPlaced = true;
+            } else if (palletColIdx > 0 && footerCells[palletColIdx - 1] === '<td></td>') { // Else, try cell to the left if empty
+                 footerCells[palletColIdx - 1] = `<td><strong>Total Pallets:</strong></td>`;
+                 palletLabelPlaced = true;
             }
+            // Value always goes under the 'Pallet' column header
+            footerCells[palletColIdx] = `<td><strong>${totalPallets.toLocaleString()}</strong></td>`;
 
-            if (palletColIdx + 1 < footerCells.length) {
-                 if (footerCells[palletColIdx+1] === '<td></td>') { // Only fill if cell is empty
-                    footerCells[palletColIdx + 1] = `<td><strong>${totalPallets.toLocaleString()}</strong></td>`;
-                 }
-            } else if (footerCells[palletColIdx].includes("Total Pallets")) { // If label was set but no space for value
-                 footerCells[palletColIdx] = `<td><strong>Total Pallets: ${totalPallets.toLocaleString()}</strong></td>`;
+            if (!palletLabelPlaced) { // If no suitable empty cell for label, or 'Pallet' is first column, combine
+                footerCells[palletColIdx] = `<td><strong>Total Pallets: ${totalPallets.toLocaleString()}</strong></td>`;
             }
         }
         
@@ -443,6 +466,7 @@ async function _processShipmentDataOnline(allExtractedData, containerNumber, sto
 async function handleUpdateInventoryClick() {
     const btn = shipmentModuleState.updateInventoryBtn;
     const resultsEl = shipmentModuleState.currentResultsContainer;
+    clearAllPageMessages(); // Clear previous messages
 
     // Validate for blank item codes
     let firstBlankItemCodeView = null;
@@ -458,35 +482,33 @@ async function handleUpdateInventoryClick() {
 
     if (blankItemCodeFound) {
         const message = `Error: One or more items in the '${firstBlankItemCodeView}' view (and possibly others) have a blank Item Code. Please correct this before updating inventory.`;
-        if (resultsEl) {
-            // resultsEl.innerHTML = `<p style="color: red;">${message}</p>`;
-             // It's better to use alert for such critical validation errors to ensure user sees it,
-             // and then restore the current view.
-             alert(message);
-             // Restore the currently active view's display
-            const activeViewName = getActiveViewName();
-            if (activeViewName && shipmentModuleState.allExtractedData[activeViewName]) {
-                displayExtractedData(shipmentModuleState.allExtractedData[activeViewName]);
-            } else { // Fallback if no active view or data, though unlikely if we found blank items
-                resultsEl.innerHTML = '<p>Upload an Excel file (.xlsx or .xlsm) to see results.</p>';
-            }
-        } else {
-            alert(message); // Fallback alert if resultsEl is somehow not available
-        }
+        displayPageMessage(message, 'error');
+        // Restore the currently active view's display - this might not be necessary if the table is still visible
+        // const activeViewName = getActiveViewName();
+        // if (activeViewName && shipmentModuleState.allExtractedData[activeViewName]) {
+        //     displayExtractedData(shipmentModuleState.allExtractedData[activeViewName]);
+        // } else if (resultsEl) { 
+        //     resultsEl.innerHTML = '<p>Upload an Excel file (.xlsx or .xlsm) to see results.</p>';
+        // }
         if (btn) btn.disabled = false; // Re-enable the button
         return; // Stop processing
     }
   
     if (btn) btn.disabled = true;
-    if (resultsEl) resultsEl.innerHTML = `<p>Processing shipment... Please wait.</p>`;
+    // Display processing message using the new system, perhaps as 'info' type.
+    // For now, let's keep the resultsEl update for this specific "Processing..." message,
+    // as it's more of a status update within the results area.
+    // Or, we could use: displayPageMessage('Processing shipment... Please wait.', 'info');
+    if (resultsEl) resultsEl.innerHTML = `<p>Processing shipment... Please wait.</p>`; 
     else console.log(`Processing shipment... Please wait.`);
+
 
     const isOnline = navigator.onLine;
 
     if (!isOnline) {
         console.log("Offline: Queuing shipment file data for processing when online.");
         if (!window.indexedDBManager || typeof window.indexedDBManager.addItem !== 'function') {
-            alert("Offline processing error: IndexedDB manager not available.");
+            displayPageMessage("Offline processing error: IndexedDB manager not available.", 'error');
             if (resultsEl && getActiveViewName()) displayExtractedData(shipmentModuleState.allExtractedData[getActiveViewName()]);
             if (btn) btn.disabled = false;
             return;
@@ -502,14 +524,14 @@ async function handleUpdateInventoryClick() {
                 },
                 timestamp: new Date().toISOString()
             });
-            alert('Shipment data saved for processing when online.');
+            displayPageMessage('Shipment data saved for processing when online.', 'success', 5000); // Auto-dismiss after 5s
             Object.keys(shipmentModuleState.allExtractedData).forEach(key => shipmentModuleState.allExtractedData[key] = []);
             shipmentModuleState.containerNumber = null;
             shipmentModuleState.storedDate = null;
             redisplayCurrentData(); 
         } catch (queueError) {
             console.error("Error queueing shipment data for offline processing:", queueError);
-            alert("Error saving shipment data for offline processing. Please try again when online.");
+            displayPageMessage("Error saving shipment data for offline processing. Please try again when online.", 'error');
             if (resultsEl && getActiveViewName()) displayExtractedData(shipmentModuleState.allExtractedData[getActiveViewName()]);
         } finally {
             if (btn) btn.disabled = false;
@@ -524,7 +546,15 @@ async function handleUpdateInventoryClick() {
             shipmentModuleState.containerNumber,
             shipmentModuleState.storedDate
         );
-        alert(result.message);
+        // Determine message type based on result.success and itemsUpdated
+        let messageType = 'info';
+        if (result.success) {
+            messageType = result.itemsUpdated > 0 ? 'success' : 'info';
+        } else { // Should ideally not happen if result.success is the flag, but as a fallback
+            messageType = 'error'; 
+        }
+        displayPageMessage(result.message, messageType, messageType === 'success' ? 5000 : 0);
+
         if (result.success && result.itemsUpdated > 0) {
             Object.keys(shipmentModuleState.allExtractedData).forEach(key => shipmentModuleState.allExtractedData[key] = []);
             shipmentModuleState.containerNumber = null;
@@ -535,7 +565,7 @@ async function handleUpdateInventoryClick() {
         }
     } catch (error) {
         console.error('Error processing shipment online: ', error);
-        alert(`Error updating inventory: ${error.message}`);
+        displayPageMessage(`Error updating inventory: ${error.message}`, 'error');
         if (resultsEl && getActiveViewName()) displayExtractedData(shipmentModuleState.allExtractedData[getActiveViewName()]);
     } finally {
         if (btn) btn.disabled = false;
@@ -602,16 +632,20 @@ function processNewFile(file) {
     const resultsEl = shipmentModuleState.currentResultsContainer; 
     const tabNavEl = shipmentModuleState.currentShipmentTabNav;   
     const shipmentDetailsContainerGlobal = document.getElementById('shipmentDetailsContainer');
+    
+    clearAllPageMessages(); // Clear previous messages on new file selection
     if (shipmentDetailsContainerGlobal) shipmentDetailsContainerGlobal.innerHTML = '';
   
     if (!file) {
-        if (resultsEl) resultsEl.innerHTML = '<p style="color: orange;">No file selected.</p>';
+        displayPageMessage('No file selected.', 'warning');
+        if (resultsEl) resultsEl.innerHTML = '<p>Upload an Excel file (.xlsx or .xlsm) to see results.</p>'; // Keep default message in results area
         if (tabNavEl) tabNavEl.style.display = 'none';
         updateButtonState(); return;
     }
     const validExtensions = ['.xlsx', '.xlsm'];
     if (!validExtensions.some(ext => file.name.toLowerCase().endsWith(ext))) { 
-        if (resultsEl) resultsEl.innerHTML = '<p style="color: red;">Invalid file type. Please select an .xlsx or .xlsm file.</p>';
+        displayPageMessage('Invalid file type. Please select an .xlsx or .xlsm file.', 'error');
+        if (resultsEl) resultsEl.innerHTML = '<p>Upload an Excel file (.xlsx or .xlsm) to see results.</p>'; // Keep default message
         if (tabNavEl) tabNavEl.style.display = 'none';
         updateButtonState(); return; 
     }
@@ -619,6 +653,7 @@ function processNewFile(file) {
     const reader = new FileReader();
     reader.onload = function(e) {
         try {
+            clearAllPageMessages(); // Clear any previous messages like "invalid file type" if this stage is reached
             if (shipmentDetailsContainerGlobal) shipmentDetailsContainerGlobal.innerHTML = '';
             if (typeof XLSX === 'undefined') throw new Error("SheetJS library (XLSX) not loaded.");
             const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
@@ -648,9 +683,9 @@ function processNewFile(file) {
             console.log(`FINAL - Container Number: ${shipmentModuleState.containerNumber}, Stored Date: ${shipmentModuleState.storedDate}`);
   
             const convertSheet = workbook.Sheets['Convert'];
-            if (!convertSheet) throw new Error("Sheet 'Convert' not found.");
+            if (!convertSheet) throw new Error("Sheet 'Convert' not found in the Excel file.");
             const convertSheetData = XLSX.utils.sheet_to_json(convertSheet, { header: 1, blankrows: false });
-            if (convertSheetData.length === 0) throw new Error("The 'Convert' sheet is empty.");
+            if (convertSheetData.length === 0) throw new Error("The 'Convert' sheet in the Excel file is empty.");
             
             const sheet1LookupMap = new Map();
             if (sheet1) {
@@ -670,18 +705,33 @@ function processNewFile(file) {
                     shipmentModuleState.allExtractedData['Jordon'] = extractJordonData(jordonSheet, sheet1LookupMap);
                 } catch (jordonError) {
                     console.error('Error during Jordon-specific extraction:', jordonError);
+                    // Optionally display this error to the user if it's critical for Jordon view
+                    displayPageMessage(`Error processing Jordon sheet data: ${jordonError.message}`, 'warning');
                     shipmentModuleState.allExtractedData['Jordon'] = [];
                 }
             }
             shipmentModuleState.viewDefinitions.forEach(viewDef => {
-                if (!(viewDef.name === 'Jordon' && jordonSheet)) {
-                    shipmentModuleState.allExtractedData[viewDef.name] = extractDataForView(convertSheetData, viewDef, sheet1LookupMap);
+                if (!(viewDef.name === 'Jordon' && jordonSheet)) { // Don't re-process Jordon if already done
+                    try {
+                        shipmentModuleState.allExtractedData[viewDef.name] = extractDataForView(convertSheetData, viewDef, sheet1LookupMap);
+                    } catch (viewError) {
+                        console.error(`Error processing data for view ${viewDef.displayName}:`, viewError);
+                        displayPageMessage(`Error processing data for ${viewDef.displayName}: ${viewError.message}`, 'warning');
+                        shipmentModuleState.allExtractedData[viewDef.name] = []; // Ensure it's an empty array on error
+                    }
                 }
             });
             redisplayCurrentData();
+            if (Object.values(shipmentModuleState.allExtractedData).every(data => data.length === 0)) {
+                displayPageMessage('Successfully processed the file, but no data was extracted for any view. Please check the file content and sheet names (e.g., Jordon, Convert, sheet 1).', 'warning');
+            } else {
+                displayPageMessage('Excel file processed successfully.', 'success', 3000); // Auto-dismiss after 3s
+            }
+
         } catch (error) {
             console.error('Error processing file:', error);
-            if (resultsEl) resultsEl.innerHTML = `<p style="color: red;">An error occurred: ${error.message}</p>`;
+            displayPageMessage(`An error occurred while processing the file: ${error.message}`, 'error');
+            if (resultsEl) resultsEl.innerHTML = '<p>Upload an Excel file (.xlsx or .xlsm) to see results.</p>'; // Reset results area
             if (tabNavEl) tabNavEl.style.display = 'none';
             if (shipmentDetailsContainerGlobal) shipmentDetailsContainerGlobal.innerHTML = '';
             updateButtonState(); 
@@ -689,7 +739,8 @@ function processNewFile(file) {
     };
     reader.onerror = function(error) { 
         console.error('FileReader error:', error);
-        if (resultsEl) resultsEl.innerHTML = '<p style="color: red;">Error reading file.</p>';
+        displayPageMessage('Error reading file. It might be corrupted or your browser had an issue accessing it.', 'error');
+        if (resultsEl) resultsEl.innerHTML = '<p>Upload an Excel file (.xlsx or .xlsm) to see results.</p>'; // Reset
         if (tabNavEl) tabNavEl.style.display = 'none';
         if (shipmentDetailsContainerGlobal) shipmentDetailsContainerGlobal.innerHTML = '';
         updateButtonState();
@@ -737,3 +788,47 @@ window.shipmentProcessor = {
 };
   
 // DO NOT call initializeShipmentFeature() here.
+
+// --- Page Message Display Function ---
+function displayPageMessage(message, type = 'info', duration = 0) {
+    const container = document.getElementById('pageMessages');
+    if (!container) {
+        console.error('Page messages container (#pageMessages) not found. Falling back to alert.');
+        alert(message); // Fallback if container is missing
+        return;
+    }
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `page-message ${type}`; // e.g., page-message error
+    messageDiv.textContent = message;
+
+    const closeButton = document.createElement('button');
+    closeButton.className = 'close-message-btn';
+    closeButton.innerHTML = '&times;'; // '×' symbol
+    closeButton.setAttribute('aria-label', 'Close message');
+    closeButton.onclick = () => {
+        messageDiv.remove();
+    };
+
+    messageDiv.appendChild(closeButton);
+    container.appendChild(messageDiv); // Add new message to the end
+
+    // Optional: Auto-dismiss after a duration
+    if (duration > 0) {
+        setTimeout(() => {
+            messageDiv.remove();
+        }, duration);
+    }
+}
+
+// Helper to clear all messages if needed, e.g., before a new file upload
+function clearAllPageMessages() {
+    const container = document.getElementById('pageMessages');
+    if (container) {
+        container.innerHTML = '';
+    }
+}
+
+// Make functions globally accessible for other scripts
+window.displayPageMessage = displayPageMessage;
+window.clearAllPageMessages = clearAllPageMessages;
