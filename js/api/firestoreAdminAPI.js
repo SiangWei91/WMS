@@ -1,6 +1,7 @@
 // Firestore Admin Functions
 // This file will contain functions for administrative tasks related to Firestore,
 // such as clearing collections.
+import { incrementReadCount } from '../firebaseReadCounter.js';
 
 /**
  * Clears all documents from specified Firestore collections.
@@ -20,7 +21,8 @@ async function clearFirestoreCollections(collectionNames) {
     try {
       console.log(`Attempting to clear collection: ${collectionName}`);
       const collectionRef = db.collection(collectionName);
-      const querySnapshot = await collectionRef.limit(500).get(); // Process in batches to avoid memory issues
+      let querySnapshot = await collectionRef.limit(500).get(); // Process in batches to avoid memory issues
+      incrementReadCount(querySnapshot.docs.length || 1); // Count initial read
 
       if (querySnapshot.empty) {
         console.log(`Collection ${collectionName} is already empty or does not exist.`);
@@ -28,32 +30,28 @@ async function clearFirestoreCollections(collectionNames) {
       }
 
       let deletedCount = 0;
-      let batch = db.batch();
-      let batchCount = 0;
+      
+      // Loop as long as there are documents to delete
+      while (!querySnapshot.empty) {
+        let batch = db.batch();
+        let batchCount = 0;
 
-      for (const doc of querySnapshot.docs) {
-        batch.delete(doc.ref);
-        batchCount++;
-        if (batchCount >= 490) { // Firestore batch limit is 500 operations
-          await batch.commit();
-          deletedCount += batchCount;
-          console.log(`Cleared ${batchCount} documents from ${collectionName} in a batch.`);
-          batch = db.batch(); // Start a new batch
-          batchCount = 0;
-          // Fetch next batch of documents
-          const nextSnapshot = await collectionRef.limit(500).get();
-          if (nextSnapshot.empty) break; // No more documents
-          // This simple batching might not cover all documents if collection is very large.
-          // A more robust solution would loop `get()` calls until empty.
-          // For now, this handles up to 500 docs per collection.
-          // TODO: Implement recursive batch deletion for very large collections if needed.
+        for (const doc of querySnapshot.docs) {
+          batch.delete(doc.ref);
+          batchCount++;
         }
-      }
-
-      if (batchCount > 0) {
+        
         await batch.commit();
         deletedCount += batchCount;
-        console.log(`Cleared remaining ${batchCount} documents from ${collectionName}.`);
+        console.log(`Cleared ${batchCount} documents from ${collectionName} in a batch.`);
+
+        if (batchCount < 500) { // If last batch was smaller than limit, no more docs
+            break;
+        }
+
+        // Fetch next batch of documents
+        querySnapshot = await collectionRef.limit(500).get();
+        incrementReadCount(querySnapshot.docs.length || 1); // Count this subsequent read
       }
       
       console.log(`Successfully cleared ${deletedCount} documents from collection: ${collectionName}`);
