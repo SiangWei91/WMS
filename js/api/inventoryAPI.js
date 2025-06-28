@@ -1,6 +1,7 @@
 // Depends on: helpers.js (ensureDbManager, areObjectsShallowEqual)
 // Depends on: listeners.js (inventoryListenerUnsubscribe)
 // Depends on: productAPI.js (window.productAPI.getProducts for enrichment)
+import { incrementReadCount } from '../firebaseReadCounter.js';
 
 const WAREHOUSE_CACHE_DURATION_MS = 10 * 60 * 1000; 
 let warehouseCache = { data: null, timestamp: 0 };
@@ -16,6 +17,7 @@ const inventoryAPI_module = { // Renamed to avoid conflict if script loaded mult
                 if (!window.db) throw new Error("Firestore 'db' instance is not available.");
                 
                 const firestoreAggSnapshot = await window.db.collection('inventory_aggregated').get();
+                incrementReadCount(firestoreAggSnapshot.docs.length || 1); // Count reads
                 const firestoreInventoryItems = firestoreAggSnapshot.docs.map(doc => {
                     const data = doc.data();
                     if (!data.productCode) data.productCode = doc.id; 
@@ -75,6 +77,7 @@ const inventoryAPI_module = { // Renamed to avoid conflict if script loaded mult
             } else {
                 if (!window.db) throw new Error("Firestore 'db' instance is not available for warehouses.");
                 const warehousesSnapshot = await window.db.collection('warehouses').get();
+                 incrementReadCount(warehousesSnapshot.docs.length || 1); // Count reads
                 allWarehouses = warehousesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 warehouseCache.data = allWarehouses;
                 warehouseCache.timestamp = now;
@@ -99,6 +102,7 @@ const inventoryAPI_module = { // Renamed to avoid conflict if script loaded mult
             }
             inventoryListenerUnsubscribe = window.db.collection('inventory_aggregated')
                 .onSnapshot(async (querySnapshot) => {
+                    incrementReadCount(querySnapshot.docs.length || 1); // Count reads for snapshot delivery
                     await ensureDbManager(); 
                     const changes = querySnapshot.docChanges();
                     let itemsToUpdate = [];
@@ -182,6 +186,7 @@ const inventoryAPI_module = { // Renamed to avoid conflict if script loaded mult
                 .where('warehouseId', '==', warehouseId)
                 .where('quantity', '>', 0) // Only include batches with available stock
                 .get();
+            incrementReadCount(snapshot.docs.length || 1); // Count reads
 
             if (snapshot.empty) {
                 console.log(`[inventoryAPI.getBatchDetailsForProduct] No matching batch details found for productCode: ${productCode}, warehouseId: ${warehouseId}`);
