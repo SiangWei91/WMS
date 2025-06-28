@@ -1,5 +1,6 @@
 // Depends on: helpers.js (ensureDbManager, areObjectsShallowEqual)
 // Depends on: listeners.js (productsListenerUnsubscribe)
+import { incrementReadCount } from '../firebaseReadCounter.js';
 
 const productAPI_indexedDB = {
     async fetchAllProductsFromFirestoreAndStoreInIndexedDB() {
@@ -8,6 +9,7 @@ const productAPI_indexedDB = {
             if (!window.db) throw new Error("Firestore 'db' instance is not available.");
 
             const querySnapshot = await window.db.collection('products').orderBy('productCode', 'asc').get();
+            incrementReadCount(querySnapshot.docs.length || 1); // Count reads (at least 1 for the query itself)
             const products = querySnapshot.docs.map(doc => {
                 const data = doc.data();
                 if (data.createdAt && data.createdAt.toDate) {
@@ -226,6 +228,7 @@ const productAPI_indexedDB = {
             console.log("Product not in IndexedDB, fetching from Firestore by ID:", productId);
             const productDocRef = window.db.collection('products').doc(productId);
             const docSnap = await productDocRef.get();
+            incrementReadCount(1); // Count this get operation
             if (docSnap.exists) {
                 let firestoreProduct = { id: docSnap.id, ...docSnap.data() };
                 if (firestoreProduct.createdAt && firestoreProduct.createdAt.toDate) {
@@ -347,6 +350,7 @@ const productAPI_indexedDB = {
             console.log("Product not in IndexedDB, fetching from Firestore by code:", trimmedCode);
             const productQuery = window.db.collection('products').where('productCode', '==', trimmedCode).limit(1);
             const snapshot = await productQuery.get();
+            incrementReadCount(snapshot.docs.length || 1); // Count reads
             if (snapshot.empty) {
                 console.warn(`Product with code ${trimmedCode} not found in Firestore.`);
                 return null;
@@ -399,6 +403,7 @@ const productAPI_indexedDB = {
             }
             productsListenerUnsubscribe = window.db.collection('products')
                 .onSnapshot(async (querySnapshot) => {
+                    incrementReadCount(querySnapshot.docs.length || 1); // Count reads for the snapshot delivery
                     await ensureDbManager(); 
                     const changes = querySnapshot.docChanges();
                     let itemsToUpdate = [];
