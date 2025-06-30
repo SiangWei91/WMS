@@ -311,6 +311,47 @@ window.indexedDBManager = {
     STORE_NAMES
 };
 
+
+/**
+ * Counts all items in a specified object store.
+ * @param {string} storeName The name of the object store.
+ * @returns {Promise<number>} A promise that resolves with the number of items in the store.
+ */
+async function countItems(storeName) {
+    const currentDb = await initDB();
+    return new Promise((resolve, reject) => {
+        if (!currentDb.objectStoreNames.contains(storeName)) {
+            console.warn(`Store "${storeName}" not found for counting. Returning 0.`);
+            return resolve(0);
+        }
+        const transaction = currentDb.transaction(storeName, 'readonly');
+        const store = transaction.objectStore(storeName);
+        const request = store.count();
+
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = (event) => {
+            console.error(`Error counting items in ${storeName}:`, event.target.error);
+            reject(`Error counting items in ${storeName}: ${event.target.error}`);
+        };
+    });
+}
+
+
+// Expose the functions and STORE_NAMES to be used by other modules
+window.indexedDBManager = {
+    initDB,
+    addItem,
+    getItem,
+    getAllItems,
+    updateItem,
+    deleteItem,
+    getItemsByIndex,
+    clearStore,
+    bulkPutItems,
+    countItems, // Added new countItems method
+    STORE_NAMES
+};
+
 let dbInitializationPromise = null;
 
 function initializeDBOnce() {
