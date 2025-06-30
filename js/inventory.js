@@ -189,8 +189,9 @@ async function fetchDataAndDisplayInventory() {
         currentAggregatedInventory = response.aggregatedInventory || [];
         currentAggregatedInventory.forEach(item => {
             if (item.packaging === undefined) item.packaging = '-';
-            if (typeof item.quantitiesByWarehouseId !== 'object' || item.quantitiesByWarehouseId === null) {
-                item.quantitiesByWarehouseId = {};
+            // Ensure quantities_by_warehouse_id is an object
+            if (typeof item.quantities_by_warehouse_id !== 'object' || item.quantities_by_warehouse_id === null) {
+                item.quantities_by_warehouse_id = {};
             }
         });
         currentWarehouses = response.warehouses || []; 
@@ -210,7 +211,7 @@ function displayInventory() {
     if (currentSearchTerm) {
         const lowerSearchTerm = currentSearchTerm.toLowerCase();
         filteredInventory = currentAggregatedInventory.filter(item =>
-            (item.product_code && item.product_code.toLowerCase().includes(lowerSearchTerm)) || // CHANGED HERE
+            (item.product_code && item.product_code.toLowerCase().includes(lowerSearchTerm)) ||
             (item.productName && item.productName.toLowerCase().includes(lowerSearchTerm))
         );
     }
@@ -270,12 +271,12 @@ function renderInventoryTable(aggregatedItems, warehousesForHeader, isExpanded) 
 
     aggregatedItems.forEach(item => {
         const row = tbody.insertRow();
-        row.setAttribute('data-product-code', item.product_code || ''); // CHANGED HERE
+        row.setAttribute('data-product-code', item.product_code || ''); 
         row.setAttribute('data-product-name', item.productName || 'N/A');
         row.setAttribute('data-packaging', item.packaging || '-');
 
         const cellProductCode = row.insertCell();
-        cellProductCode.textContent = item.product_code || '-'; // CHANGED HERE
+        cellProductCode.textContent = item.product_code || '-'; 
         cellProductCode.classList.add('cell-product-code'); 
 
         const cellProductName = row.insertCell();
@@ -283,13 +284,14 @@ function renderInventoryTable(aggregatedItems, warehousesForHeader, isExpanded) 
         cellProductName.classList.add('cell-product-name');
         
         const totalQtyCell = row.insertCell();
-        totalQtyCell.textContent = item.total_quantity !== undefined ? item.total_quantity : '-'; // CHANGED HERE
+        totalQtyCell.textContent = item.total_quantity !== undefined ? item.total_quantity : '-'; 
         totalQtyCell.style.textAlign = 'center';
         totalQtyCell.classList.add('cell-total-qty');
 
         if (isExpanded) {
             warehousesForHeader.forEach(wh => {
-                const qty = (item.quantitiesByWarehouseId && item.quantitiesByWarehouseId[wh.id] !== undefined) ? item.quantitiesByWarehouseId[wh.id] : 0;
+                // CORRECTED THIS LINE:
+                const qty = (item.quantities_by_warehouse_id && item.quantities_by_warehouse_id[wh.id] !== undefined) ? item.quantities_by_warehouse_id[wh.id] : 0;
                 const cell = row.insertCell();
                 cell.textContent = qty === 0 ? '' : qty;
                 cell.style.textAlign = 'center';
@@ -317,7 +319,7 @@ window.closeProductTransactionsModal = closeProductTransactionsModal;
 
 async function displayProductTransactions(productCode, productName, packaging) {
     if (typeof window.clearAllPageMessages === 'function') {
-        // window.clearAllPageMessages(); // Decide if global messages should clear for a modal
+        // window.clearAllPageMessages(); 
     }
     if (!productCode) { 
         if (typeof window.displayPageMessage === 'function') {
@@ -335,8 +337,8 @@ async function displayProductTransactions(productCode, productName, packaging) {
     openProductTransactionsModal();
 
     try {
-        console.log(`[displayProductTransactions] Fetching transactions for productCode: ${productCode}`); // productCode here is product_code
-        const response = await window.transactionAPI.getTransactions({ product_code: productCode, limit: 1000 }); // Pass product_code to API
+        console.log(`[displayProductTransactions] Fetching transactions for productCode: ${productCode}`); 
+        const response = await window.transactionAPI.getTransactions({ product_code: productCode, limit: 1000 }); 
         const allTransactions = response.data || [];
         console.log(`[displayProductTransactions] Received ${allTransactions.length} transactions raw:`, JSON.parse(JSON.stringify(allTransactions)));
 
@@ -347,7 +349,7 @@ async function displayProductTransactions(productCode, productName, packaging) {
         }
         transactionsContentDiv.innerHTML = ''; 
         const transactionsByWarehouse = allTransactions.reduce((acc, tx) => {
-            const whId = tx.warehouse_id || 'unknown_warehouse'; // Ensure using snake_case from transaction object
+            const whId = tx.warehouse_id || 'unknown_warehouse'; 
             if (!acc[whId]) acc[whId] = [];
             acc[whId].push(tx);
             return acc;
@@ -379,7 +381,7 @@ async function displayProductTransactions(productCode, productName, packaging) {
                 const quantity = Number(tx.quantity) || 0;
                 if (tx.type === 'inbound' || tx.type === 'initial') currentBalance += quantity;
                 else if (tx.type === 'outbound') currentBalance -= quantity;
-                row.insertCell().textContent = formatTransactionDate(tx.transactionDate); // transactionDate is already correct from API
+                row.insertCell().textContent = formatTransactionDate(tx.transactionDate); 
                 const typeCell = row.insertCell();
                 const typeSpan = document.createElement('span');
                 typeSpan.className = `badge ${getTransactionBadgeClass(tx.type)}`;
@@ -390,9 +392,9 @@ async function displayProductTransactions(productCode, productName, packaging) {
                 quantityCell.className = (tx.type === 'inbound' || tx.type === 'initial') ? 'text-success' : 'text-danger';
                 
                 let batchNoDisplay = '-'; 
-                if (tx.product_batch_no) { // Check for snake_case product_batch_no
+                if (tx.product_batch_no) { 
                     batchNoDisplay = tx.product_batch_no;
-                } else if (tx.batch_no) { // Fallback to snake_case batch_no
+                } else if (tx.batch_no) { 
                     if (tx.batch_no.startsWith('TRANSFER-')) {
                         batchNoDisplay = 'Internal Transfer'; 
                     } else {
@@ -431,8 +433,7 @@ function showInternalTransferMemo(data) {
         return;
     }
 
-    // Populate modal fields using product_code from data
-    document.getElementById('transfer-product-code').textContent = data.productCode || 'N/A'; // productCode here is actually product_code
+    document.getElementById('transfer-product-code').textContent = data.productCode || 'N/A'; 
     document.getElementById('transfer-product-name').textContent = data.productName || 'N/A';
     document.getElementById('transfer-product-packaging').textContent = data.packaging || 'N/A';
     document.getElementById('transfer-source-warehouse').textContent = data.sourceWarehouseName ? `${data.sourceWarehouseName} (ID: ${data.sourceWarehouseId})` : data.sourceWarehouseId;
@@ -490,7 +491,7 @@ function showInternalTransferMemo(data) {
         const finalBatchDetailsContainer = document.getElementById('transfer-batch-details-container');
         const finalLoadingMessage = document.getElementById('transfer-batch-loading-message');
 
-        window.inventoryAPI.getBatchDetailsForProduct(data.productCode, data.sourceWarehouseId) // data.productCode is product_code
+        window.inventoryAPI.getBatchDetailsForProduct(data.productCode, data.sourceWarehouseId) 
             .then(batches => {
                 if (!finalBatchDetailsContainer) {
                     console.error("Batch details container not found when trying to display batches.");
@@ -596,7 +597,6 @@ async function handleInternalTransferSubmit() {
 
     const quantityToTransfer = parseInt(quantityInput.value, 10);
     const destinationWarehouseId = destinationSelect.value;
-    // currentTransferData.productCode is already product_code from the row's dataset
     const { productCode, productName, packaging, sourceWarehouseId, availableQuantity } = currentTransferData; 
     
     let selectedBatchNo = null;
@@ -643,11 +643,11 @@ async function handleInternalTransferSubmit() {
     }
 
     const operatorId = sessionStorage.getItem('loggedInUser') || 'unknown_operator'; 
-    const productId = currentTransferData.productId || null; // Assuming productId might be added to currentTransferData later
+    const productId = currentTransferData.productId || null; 
 
     const transferPayload = {
         productId, 
-        product_code: productCode, // Ensure API receives product_code
+        product_code: productCode, 
         productName,
         packaging, 
         sourceWarehouseId,
@@ -669,7 +669,6 @@ async function handleInternalTransferSubmit() {
         if (!window.transactionAPI || typeof window.transactionAPI.performInternalTransfer !== 'function') {
             throw new Error("Internal transfer API function is not available.");
         }
-        // Pass product_code to performInternalTransfer
         await window.transactionAPI.performInternalTransfer(transferPayload); 
         if (typeof window.displayPageMessage === 'function') {
             window.displayPageMessage('Internal transfer submitted successfully!', 'success', 3000);
