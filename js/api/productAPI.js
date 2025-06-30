@@ -8,14 +8,18 @@ let supabaseProductSubscription = null; // For Supabase real-time subscription
 // Helper function to map Supabase row to JS object
 function supabaseToJsProduct(supabaseProduct) {
     if (!supabaseProduct) return null;
+    // Assuming Supabase columns are: productCode, created_at, name, packaging, ChineseName, group, brand
+    // And 'id' for IndexedDB should come from 'productCode'
     return {
-        id: supabaseProduct.id,
-        productCode: supabaseProduct.product_code,
+        id: supabaseProduct.productCode, // Use productCode from Supabase as the ID for IndexedDB
+        productCode: supabaseProduct.productCode,
         name: supabaseProduct.name,
-        'Chinese Name': supabaseProduct.chinese_name, // Assuming 'chinese_name' in Supabase
+        'Chinese Name': supabaseProduct.ChineseName, // Corrected mapping
         packaging: supabaseProduct.packaging,
-        createdAt: supabaseProduct.created_at, // Assuming 'created_at' in Supabase
-        updatedAt: supabaseProduct.updated_at, // Assuming 'updated_at' in Supabase
+        group: supabaseProduct.group, // Added mapping
+        brand: supabaseProduct.brand, // Added mapping
+        createdAt: supabaseProduct.created_at,
+        updatedAt: supabaseProduct.updated_at, // Supabase might provide this, or it's handled by DB triggers
         // Include any other fields that need mapping
         ...(supabaseProduct.pendingSync !== undefined && { pendingSync: supabaseProduct.pendingSync }) // Preserve if already a JS object from IDB
     };
@@ -24,16 +28,18 @@ function supabaseToJsProduct(supabaseProduct) {
 // Helper function to map JS object to Supabase row for insert/update
 function jsToSupabaseProduct(jsProduct) {
     if (!jsProduct) return null;
+    // Ensure these JS property names match what's in your jsProduct objects
     const supabaseData = {
-        // id is usually not sent for insert, and used in .eq() for update/delete
-        product_code: jsProduct.productCode,
+        // id is not a Supabase column based on provided list, productCode is
+        productCode: jsProduct.productCode, // Map to Supabase 'productCode'
         name: jsProduct.name,
-        chinese_name: jsProduct['Chinese Name'],
+        ChineseName: jsProduct['Chinese Name'], // Map to Supabase 'ChineseName'
         packaging: jsProduct.packaging,
+        group: jsProduct.group, // Added mapping
+        brand: jsProduct.brand, // Added mapping
         // created_at and updated_at are often handled by Supabase defaults (e.g., now())
-        // Only include them if you are setting them manually from the client
-        // created_at: jsProduct.createdAt,
-        // updated_at: jsProduct.updatedAt
+        // created_at: jsProduct.createdAt, // Only if you intend to set it from client
+        // updated_at: jsProduct.updatedAt // Only if you intend to set it from client
     };
     // Remove undefined fields to avoid issues with Supabase client
     Object.keys(supabaseData).forEach(key => supabaseData[key] === undefined && delete supabaseData[key]);
@@ -50,21 +56,39 @@ const productAPI_supabase = {
             const { data, error } = await window.supabaseClient
                 .from('products')
                 .select('*')
-                .order('product_code', { ascending: true }); // Use Supabase column name
+                .order('productCode', { ascending: true }); // Use Supabase column name
 
             if (error) throw error;
 
             const products = data.map(supabaseToJsProduct);
             console.log(`Fetched ${products.length} products from Supabase.`);
 
+            // Log products with invalid IDs and filter them out
+            const validProducts = [];
+            let invalidProductsFound = 0;
+            products.forEach((p, index) => { // Added index for better logging
+                // Check if id is present and is a valid key (not null, undefined, or empty string)
+                if (p && typeof p.id !== 'undefined' && p.id !== null && String(p.id).trim() !== "") {
+                    validProducts.push(p);
+                } else {
+                    invalidProductsFound++;
+                    // p is the problematic mapped object. data[index] is the original Supabase row object.
+                    console.warn('Product with invalid or missing ID (derived from productCode) excluded from IndexedDB. Mapped object:', p, 'Original Supabase data row:', data[index]);
+                }
+            });
+
+            if (invalidProductsFound > 0) {
+                console.error(`Excluded ${invalidProductsFound} products from IndexedDB due to missing or invalid IDs. See warnings above. Please check data integrity in Supabase.`);
+            }
+
             await window.indexedDBManager.clearStore(window.indexedDBManager.STORE_NAMES.PRODUCTS);
             console.log("Cleared existing products from IndexedDB.");
 
-            if (products.length > 0) {
-                await window.indexedDBManager.bulkPutItems(window.indexedDBManager.STORE_NAMES.PRODUCTS, products);
-                console.log(`Bulk stored/updated ${products.length} products in IndexedDB.`);
+            if (validProducts.length > 0) {
+                await window.indexedDBManager.bulkPutItems(window.indexedDBManager.STORE_NAMES.PRODUCTS, validProducts);
+                console.log(`Bulk stored/updated ${validProducts.length} products in IndexedDB.`);
             } else {
-                console.log("No products fetched from Supabase to store.");
+                console.log("No valid products fetched from Supabase to store in IndexedDB.");
             }
             return products;
         } catch (error) {
@@ -301,15 +325,17 @@ const productAPI_supabase = {
                 const payloadForSupabase = jsToSupabaseProduct(productDataJS);
                 // Do not send id, created_at, or updated_at in the update payload itself
                 // Supabase handles updated_at, id is used in .eq()
-                delete payloadForSupabase.id; 
-                delete payloadForSupabase.created_at;
-                delete payloadForSupabase.updated_at;
+                delete payloadForSupabase.id; // Assuming 'id' is not a column to be updated in Supabase 'products' table.
+                delete payloadForSupabase.created_at; // Usually handled by DB
+                delete payloadForSupabase.updated_at; // Usually handled by DB
 
+                console.log("Attempting to update product in Supabase. Product ID for .eq():", productId);
+                console.log("Payload for Supabase update:", JSON.stringify(payloadForSupabase, null, 2));
 
                 const { data: updatedSupabaseProductRow, error } = await window.supabaseClient
                     .from('products')
                     .update(payloadForSupabase)
-                    .eq('id', productId)
+                    .eq('productCode', productId) // Corrected: Use 'productCode' for the .eq() clause
                     .select()
                     .single();
 
@@ -337,7 +363,9 @@ const productAPI_supabase = {
                 return updatedProductForIndexedDB;
             }
         } catch (error) {
-            console.error("Error updating product:", error);
+            console.error("Error updating product. Supabase error code:", error.code, "message:", error.message, "details:", error.details, "hint:", error.hint);
+            console.error("Update productId:", productId);
+            // console.error("Update payload for Supabase:", jsToSupabaseProduct(productDataJS)); // Log payload if needed, be mindful of sensitive data
             throw error;
         }
     },
