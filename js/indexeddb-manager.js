@@ -1,5 +1,5 @@
 const DB_NAME = 'InventoryAppDB';
-const DB_VERSION = 2; // Incremented version to ensure onupgradeneeded runs
+const DB_VERSION = 3; // Incremented version for product_code refactor
 let iDb; // Renamed from db to avoid potential clashes
 
 const STORE_NAMES = {
@@ -39,59 +39,39 @@ function initDB() {
             console.log(`Upgrading IndexedDB from version ${event.oldVersion} to ${event.newVersion}`);
 
             // Products store
-            if (!tempDb.objectStoreNames.contains(STORE_NAMES.PRODUCTS)) {
-                const productStore = tempDb.createObjectStore(STORE_NAMES.PRODUCTS, { keyPath: 'id', autoIncrement: false });
-                productStore.createIndex('productCode', 'productCode', { unique: true });
-                productStore.createIndex('name', 'name', { unique: false });
-                productStore.createIndex('chineseName', 'chineseName', { unique: false }); // Corrected keyPath
-                console.log(`Object store '${STORE_NAMES.PRODUCTS}' created.`);
-            } else {
-                // If the store exists, check and add the new index if missing (for upgrades)
-                const transaction = event.target.transaction;
-                if (transaction) { // Should always be true in onupgradeneeded
-                    const productStore = transaction.objectStore(STORE_NAMES.PRODUCTS);
-                    if (!productStore.indexNames.contains('chineseName')) {
-                        productStore.createIndex('chineseName', 'chineseName', { unique: false }); // Corrected keyPath
-                        console.log("Index 'chineseName' created on products store.");
-                    }
-                }
+            if (tempDb.objectStoreNames.contains(STORE_NAMES.PRODUCTS)) {
+                tempDb.deleteObjectStore(STORE_NAMES.PRODUCTS);
+                console.log(`Object store '${STORE_NAMES.PRODUCTS}' deleted for schema update (product_code refactor).`);
             }
+            const productStore = tempDb.createObjectStore(STORE_NAMES.PRODUCTS, { keyPath: 'id', autoIncrement: false });
+            productStore.createIndex('product_code', 'product_code', { unique: true }); // CHANGED
+            productStore.createIndex('name', 'name', { unique: false });
+            productStore.createIndex('chineseName', 'chineseName', { unique: false });
+            console.log(`Object store '${STORE_NAMES.PRODUCTS}' created/updated with 'product_code' index.`);
 
-            // Inventory store (caching documents from inventory_aggregated, using productCode as key)
+            // Inventory store (caching documents from inventory_aggregated, using product_code as key)
             if (tempDb.objectStoreNames.contains(STORE_NAMES.INVENTORY)) {
                 tempDb.deleteObjectStore(STORE_NAMES.INVENTORY);
-                console.log(`Object store '${STORE_NAMES.INVENTORY}' deleted for schema update.`);
+                console.log(`Object store '${STORE_NAMES.INVENTORY}' deleted for schema update (product_code refactor).`);
             }
-            // Create new store with productCode as keyPath
-            const inventoryStore = tempDb.createObjectStore(STORE_NAMES.INVENTORY, { keyPath: 'productCode' });
+            // Create new store with product_code as keyPath
+            const inventoryStore = tempDb.createObjectStore(STORE_NAMES.INVENTORY, { keyPath: 'product_code' }); // CHANGED
             // Add any indexes you might need for querying cached aggregated inventory, e.g., totalQuantity
-            // For now, no additional indexes beyond the keyPath 'productCode'.
-            console.log(`Object store '${STORE_NAMES.INVENTORY}' created/updated with keyPath 'productCode'.`);
+            // For now, no additional indexes beyond the keyPath 'product_code'. // CHANGED
+            console.log(`Object store '${STORE_NAMES.INVENTORY}' created/updated with keyPath 'product_code'.`); // CHANGED
 
 
             // Transactions store
-            if (!tempDb.objectStoreNames.contains(STORE_NAMES.TRANSACTIONS)) {
-                const transactionStore = tempDb.createObjectStore(STORE_NAMES.TRANSACTIONS, { keyPath: 'id', autoIncrement: true });
-                transactionStore.createIndex('type', 'type', { unique: false }); // e.g., 'inbound', 'outbound'
-                transactionStore.createIndex('productId', 'productId', { unique: false });
-                transactionStore.createIndex('productCode', 'productCode', { unique: false });
-                transactionStore.createIndex('transactionDate', 'transactionDate', { unique: false }); // Corrected index name
-                console.log(`Object store '${STORE_NAMES.TRANSACTIONS}' created.`);
-            } else {
-                // Handle upgrade: if store exists, check/delete old 'timestamp' index and add 'transactionDate'
-                const transaction = event.target.transaction;
-                if (transaction) {
-                    const transactionStore = transaction.objectStore(STORE_NAMES.TRANSACTIONS);
-                    if (transactionStore.indexNames.contains('timestamp')) {
-                        transactionStore.deleteIndex('timestamp');
-                        console.log("Index 'timestamp' deleted from transactions store.");
-                    }
-                    if (!transactionStore.indexNames.contains('transactionDate')) {
-                        transactionStore.createIndex('transactionDate', 'transactionDate', { unique: false });
-                        console.log("Index 'transactionDate' created on transactions store.");
-                    }
-                }
+            if (tempDb.objectStoreNames.contains(STORE_NAMES.TRANSACTIONS)) {
+                tempDb.deleteObjectStore(STORE_NAMES.TRANSACTIONS);
+                console.log(`Object store '${STORE_NAMES.TRANSACTIONS}' deleted for schema update (product_code refactor).`);
             }
+            const transactionStore = tempDb.createObjectStore(STORE_NAMES.TRANSACTIONS, { keyPath: 'id', autoIncrement: true });
+            transactionStore.createIndex('type', 'type', { unique: false }); // e.g., 'inbound', 'outbound'
+            transactionStore.createIndex('productId', 'productId', { unique: false }); // Kept as is, assuming different identifier
+            transactionStore.createIndex('product_code', 'product_code', { unique: false }); // CHANGED
+            transactionStore.createIndex('transactionDate', 'transactionDate', { unique: false });
+            console.log(`Object store '${STORE_NAMES.TRANSACTIONS}' created/updated with 'product_code' index.`);
             
             // Shipments store
             if (tempDb.objectStoreNames.contains(STORE_NAMES.SHIPMENTS)) {
@@ -403,12 +383,12 @@ async function syncOfflineQueue() {
 
                 if (op.operation === 'add') {
                     // Remove localId if it was part of the payload sent to Supabase
-                    // productCode is the PK for products table.
+                    // product_code is the PK for products table.
                     if (supabaseData.id) delete supabaseData.id; // IDB's local_... id
                     
                     const { data: newSupabaseProduct, error } = await window.supabaseClient
                         .from('products')
-                        .insert(supabaseData) // supabaseData should have productCode
+                        .insert(supabaseData) // supabaseData should have product_code
                         .select()
                         .single();
                     if (error) throw error;
@@ -429,26 +409,26 @@ async function syncOfflineQueue() {
                     }
                     success = true;
                 } else if (op.operation === 'update' && itemId) {
-                    // For update, itemId should be the productCode
-                    delete supabaseData.productCode; // Cannot update primary key
+                    // For update, itemId should be the product_code
+                    delete supabaseData.product_code; // Cannot update primary key, and ensure it's not in payload if it's the same as jsProductPayload.product_code
                     delete supabaseData.id; // remove local id if present
                     const { error } = await window.supabaseClient
                         .from('products')
                         .update(supabaseData)
-                        .eq('productCode', itemId); // Filter by productCode
+                        .eq('product_code', itemId); // Filter by product_code
                     if (error) throw error;
                     const productInDb = await window.indexedDBManager.getItem(STORE_NAMES.PRODUCTS, itemId);
                     if (productInDb) {
                         await window.indexedDBManager.updateItem(STORE_NAMES.PRODUCTS, {...productInDb, ...jsProductPayload, pendingSync: false });
                     }
                     success = true;
-                    console.log(`Sync (Supabase): Product UPDATE success for productCode ${itemId}`);
+                    console.log(`Sync (Supabase): Product UPDATE success for product_code ${itemId}`);
                 } else if (op.operation === 'delete' && itemId) {
-                    const { error } = await window.supabaseClient.from('products').delete().eq('productCode', itemId);
+                    const { error } = await window.supabaseClient.from('products').delete().eq('product_code', itemId); // Filter by product_code
                     if (error) throw error;
                     // Item already deleted from IDB
                     success = true;
-                    console.log(`Sync (Supabase): Product DELETE success for productCode ${itemId}`);
+                    console.log(`Sync (Supabase): Product DELETE success for product_code ${itemId}`);
                 }
 
             } else if (op.storeName === STORE_NAMES.TRANSACTIONS) {
@@ -464,7 +444,7 @@ async function syncOfflineQueue() {
                     await window.transactionAPI.outboundStock(txData); // This will handle Supabase interaction
                     success = true;
                 }
-                 if (success) console.log(`Sync (Supabase): Transaction ${op.operation} for ${txData.productCode} delegated to API.`);
+                 if (success) console.log(`Sync (Supabase): Transaction ${op.operation} for ${txData.product_code} delegated to API.`); // CHANGED
 
 
             } else if (op.storeName === STORE_NAMES.SHIPMENTS) {
@@ -529,7 +509,7 @@ async function syncOfflineQueue() {
 function jsToSupabaseProductPayload(jsProduct) {
     if (!jsProduct) return null;
     return {
-        productCode: jsProduct.productCode, name: jsProduct.name, packaging: jsProduct.packaging,
+        product_code: jsProduct.product_code, name: jsProduct.name, packaging: jsProduct.packaging, // CHANGED
         ChineseName: jsProduct['Chinese Name'], group: jsProduct.group, brand: jsProduct.brand,
         // created_at, updated_at are typically handled by db
     };
@@ -537,7 +517,7 @@ function jsToSupabaseProductPayload(jsProduct) {
 function supabaseToJsProductPayload(supabaseProduct) {
     if (!supabaseProduct) return null;
     return {
-        id: supabaseProduct.productCode, productCode: supabaseProduct.productCode, name: supabaseProduct.name,
+        id: supabaseProduct.product_code, product_code: supabaseProduct.product_code, name: supabaseProduct.name, // CHANGED
         packaging: supabaseProduct.packaging, 'Chinese Name': supabaseProduct.ChineseName,
         group: supabaseProduct.group, brand: supabaseProduct.brand, createdAt: supabaseProduct.created_at,
         updatedAt: supabaseProduct.updated_at,
