@@ -146,7 +146,7 @@ function handleInventoryTableClick(event) {
     const row = event.target.closest('tr');
     if (!row || !row.dataset.productCode) return; // Clicked outside a valid row or header
 
-    const productCode = row.dataset.productCode;
+    const productCode = row.dataset.productCode; // This uses data-product-code which will be set with product_code
     const productName = row.dataset.productName;
     const packaging = row.dataset.packaging;
     // const productId = row.dataset.productId; // If we add productId to row dataset later
@@ -160,7 +160,7 @@ function handleInventoryTableClick(event) {
 
             console.log(`Clicked on qty cell: Product ${productCode}, Warehouse ${warehouseId} (${warehouseName}), Qty: ${currentQtyInCell}`);
             showInternalTransferMemo({
-                productCode,
+                productCode, // This will be product_code from the dataset
                 productName,
                 packaging,
                 // productId, 
@@ -210,7 +210,7 @@ function displayInventory() {
     if (currentSearchTerm) {
         const lowerSearchTerm = currentSearchTerm.toLowerCase();
         filteredInventory = currentAggregatedInventory.filter(item =>
-            (item.productCode && item.productCode.toLowerCase().includes(lowerSearchTerm)) ||
+            (item.product_code && item.product_code.toLowerCase().includes(lowerSearchTerm)) || // CHANGED HERE
             (item.productName && item.productName.toLowerCase().includes(lowerSearchTerm))
         );
     }
@@ -270,12 +270,12 @@ function renderInventoryTable(aggregatedItems, warehousesForHeader, isExpanded) 
 
     aggregatedItems.forEach(item => {
         const row = tbody.insertRow();
-        row.setAttribute('data-product-code', item.productCode || '');
+        row.setAttribute('data-product-code', item.product_code || ''); // CHANGED HERE
         row.setAttribute('data-product-name', item.productName || 'N/A');
         row.setAttribute('data-packaging', item.packaging || '-');
 
         const cellProductCode = row.insertCell();
-        cellProductCode.textContent = item.productCode || '-';
+        cellProductCode.textContent = item.product_code || '-'; // CHANGED HERE
         cellProductCode.classList.add('cell-product-code'); 
 
         const cellProductName = row.insertCell();
@@ -283,7 +283,7 @@ function renderInventoryTable(aggregatedItems, warehousesForHeader, isExpanded) 
         cellProductName.classList.add('cell-product-name');
         
         const totalQtyCell = row.insertCell();
-        totalQtyCell.textContent = item.totalQuantity !== undefined ? item.totalQuantity : '-';
+        totalQtyCell.textContent = item.total_quantity !== undefined ? item.total_quantity : '-'; // CHANGED HERE
         totalQtyCell.style.textAlign = 'center';
         totalQtyCell.classList.add('cell-total-qty');
 
@@ -335,8 +335,8 @@ async function displayProductTransactions(productCode, productName, packaging) {
     openProductTransactionsModal();
 
     try {
-        console.log(`[displayProductTransactions] Fetching transactions for productCode: ${productCode}`);
-        const response = await window.transactionAPI.getTransactions({ productCode: productCode, limit: 1000 }); 
+        console.log(`[displayProductTransactions] Fetching transactions for productCode: ${productCode}`); // productCode here is product_code
+        const response = await window.transactionAPI.getTransactions({ product_code: productCode, limit: 1000 }); // Pass product_code to API
         const allTransactions = response.data || [];
         console.log(`[displayProductTransactions] Received ${allTransactions.length} transactions raw:`, JSON.parse(JSON.stringify(allTransactions)));
 
@@ -347,7 +347,7 @@ async function displayProductTransactions(productCode, productName, packaging) {
         }
         transactionsContentDiv.innerHTML = ''; 
         const transactionsByWarehouse = allTransactions.reduce((acc, tx) => {
-            const whId = tx.warehouseId || 'unknown_warehouse';
+            const whId = tx.warehouse_id || 'unknown_warehouse'; // Ensure using snake_case from transaction object
             if (!acc[whId]) acc[whId] = [];
             acc[whId].push(tx);
             return acc;
@@ -379,7 +379,7 @@ async function displayProductTransactions(productCode, productName, packaging) {
                 const quantity = Number(tx.quantity) || 0;
                 if (tx.type === 'inbound' || tx.type === 'initial') currentBalance += quantity;
                 else if (tx.type === 'outbound') currentBalance -= quantity;
-                row.insertCell().textContent = formatTransactionDate(tx.transactionDate);
+                row.insertCell().textContent = formatTransactionDate(tx.transactionDate); // transactionDate is already correct from API
                 const typeCell = row.insertCell();
                 const typeSpan = document.createElement('span');
                 typeSpan.className = `badge ${getTransactionBadgeClass(tx.type)}`;
@@ -389,15 +389,14 @@ async function displayProductTransactions(productCode, productName, packaging) {
                 quantityCell.textContent = (tx.type === 'inbound' || tx.type === 'initial' ? '+' : '-') + quantity;
                 quantityCell.className = (tx.type === 'inbound' || tx.type === 'initial') ? 'text-success' : 'text-danger';
                 
-                // Display productBatchNo if available, otherwise use existing logic for batchNo
-                let batchNoDisplay = '-'; // Default to '-'
-                if (tx.productBatchNo) { // Check for the new field first
-                    batchNoDisplay = tx.productBatchNo;
-                } else if (tx.batchNo) { // Fallback to the old batchNo field
-                    if (tx.batchNo.startsWith('TRANSFER-')) {
-                        batchNoDisplay = 'Internal Transfer'; // This indicates it's an operation ID
+                let batchNoDisplay = '-'; 
+                if (tx.product_batch_no) { // Check for snake_case product_batch_no
+                    batchNoDisplay = tx.product_batch_no;
+                } else if (tx.batch_no) { // Fallback to snake_case batch_no
+                    if (tx.batch_no.startsWith('TRANSFER-')) {
+                        batchNoDisplay = 'Internal Transfer'; 
                     } else {
-                        batchNoDisplay = tx.batchNo; // This is likely an older actual batch number
+                        batchNoDisplay = tx.batch_no; 
                     }
                 }
                 row.insertCell().textContent = batchNoDisplay;
@@ -432,23 +431,22 @@ function showInternalTransferMemo(data) {
         return;
     }
 
-    // Populate modal fields
-    document.getElementById('transfer-product-code').textContent = data.productCode || 'N/A';
+    // Populate modal fields using product_code from data
+    document.getElementById('transfer-product-code').textContent = data.productCode || 'N/A'; // productCode here is actually product_code
     document.getElementById('transfer-product-name').textContent = data.productName || 'N/A';
     document.getElementById('transfer-product-packaging').textContent = data.packaging || 'N/A';
     document.getElementById('transfer-source-warehouse').textContent = data.sourceWarehouseName ? `${data.sourceWarehouseName} (ID: ${data.sourceWarehouseId})` : data.sourceWarehouseId;
     document.getElementById('transfer-available-qty').textContent = data.availableQuantity !== undefined ? data.availableQuantity : 'N/A';
     
     const quantityInput = document.getElementById('transfer-quantity');
-    quantityInput.value = ''; // Clear previous value
-    quantityInput.max = data.availableQuantity; // Set max based on availability
-    // We might disable or hide this original quantity input later if batch-specific inputs are used exclusively
+    quantityInput.value = ''; 
+    quantityInput.max = data.availableQuantity; 
 
     const destinationSelect = document.getElementById('transfer-destination-warehouse');
-    destinationSelect.innerHTML = '<option value="">-- Select Destination --</option>'; // Clear previous options
+    destinationSelect.innerHTML = '<option value="">-- Select Destination --</option>'; 
     
     currentWarehouses.forEach(wh => {
-        if (wh.id !== data.sourceWarehouseId) { // Exclude source warehouse
+        if (wh.id !== data.sourceWarehouseId) { 
             const option = document.createElement('option');
             option.value = wh.id;
             option.textContent = wh.name;
@@ -456,106 +454,88 @@ function showInternalTransferMemo(data) {
         }
     });
 
-    document.getElementById('internal-transfer-error-message').textContent = ''; // Clear previous errors
+    document.getElementById('internal-transfer-error-message').textContent = ''; 
     
-    // --- Begin: Dynamically add batch details container and fetch data ---
     const errorMessageDiv = document.getElementById('internal-transfer-error-message');
     let batchDetailsContainer = document.getElementById('transfer-batch-details-container');
 
-    // Create and insert the batch container elements if they don't exist
     if (!batchDetailsContainer && errorMessageDiv && errorMessageDiv.parentNode) {
         const hr = document.createElement('hr');
         hr.style.marginTop = '15px';
         hr.style.marginBottom = '15px';
-
         const title = document.createElement('h5');
         title.style.marginBottom = '5px';
         title.textContent = 'Available Batches for Transfer:';
-
         batchDetailsContainer = document.createElement('div');
         batchDetailsContainer.id = 'transfer-batch-details-container';
         batchDetailsContainer.style.marginBottom = '15px';
-        batchDetailsContainer.style.maxHeight = '150px'; // Adjust as needed
+        batchDetailsContainer.style.maxHeight = '150px'; 
         batchDetailsContainer.style.overflowY = 'auto';
         batchDetailsContainer.style.border = '1px solid #ddd';
         batchDetailsContainer.style.padding = '10px';
         batchDetailsContainer.style.borderRadius = '4px';
-        
         const loadingMessage = document.createElement('p');
         loadingMessage.id = 'transfer-batch-loading-message';
         loadingMessage.className = 'text-muted';
         loadingMessage.textContent = 'Loading batch details...';
         batchDetailsContainer.appendChild(loadingMessage);
-
-        // Insert before the error message div
         errorMessageDiv.parentNode.insertBefore(hr, errorMessageDiv);
         errorMessageDiv.parentNode.insertBefore(title, errorMessageDiv);
         errorMessageDiv.parentNode.insertBefore(batchDetailsContainer, errorMessageDiv);
     } else if (batchDetailsContainer) {
-        // If it exists, just clear it and show loading message
         batchDetailsContainer.innerHTML = '<p id="transfer-batch-loading-message" class="text-muted">Loading batch details...</p>';
     }
 
-
-    // Fetch and display batch details
     if (window.inventoryAPI && typeof window.inventoryAPI.getBatchDetailsForProduct === 'function') {
-        // Ensure container is available for updates
         const finalBatchDetailsContainer = document.getElementById('transfer-batch-details-container');
         const finalLoadingMessage = document.getElementById('transfer-batch-loading-message');
 
-        window.inventoryAPI.getBatchDetailsForProduct(data.productCode, data.sourceWarehouseId)
+        window.inventoryAPI.getBatchDetailsForProduct(data.productCode, data.sourceWarehouseId) // data.productCode is product_code
             .then(batches => {
                 if (!finalBatchDetailsContainer) {
                     console.error("Batch details container not found when trying to display batches.");
                     return;
                 }
-                finalBatchDetailsContainer.innerHTML = ''; // Clear loading message or previous content
+                finalBatchDetailsContainer.innerHTML = ''; 
 
                 if (batches && batches.length > 0) {
                     const batchSelectionGroup = document.createElement('div');
                     batchSelectionGroup.className = 'form-group';
-                    
                     const selectLabel = document.createElement('label');
                     selectLabel.setAttribute('for', 'transfer-select-batch');
                     selectLabel.textContent = 'Select Batch to Transfer From:';
                     batchSelectionGroup.appendChild(selectLabel);
-
                     const selectBatch = document.createElement('select');
                     selectBatch.id = 'transfer-select-batch';
                     selectBatch.className = 'form-control';
-                    
                     const defaultOption = document.createElement('option');
                     defaultOption.value = "";
                     defaultOption.textContent = "-- Select a Batch --";
                     selectBatch.appendChild(defaultOption);
-
                     batches.forEach(batch => {
                         const option = document.createElement('option');
-                        option.value = batch.batchNo; // Assuming batchNo is unique enough for value
+                        option.value = batch.batchNo; 
                         option.textContent = `Batch: ${batch.batchNo || 'N/A'} (Available: ${batch.quantity})`;
                         option.dataset.batchNo = batch.batchNo;
                         option.dataset.availableQty = batch.quantity;
-                        option.dataset.batchId = batch.id; // Store Firestore doc ID if needed
+                        option.dataset.batchId = batch.id; 
                         selectBatch.appendChild(option);
                     });
                     batchSelectionGroup.appendChild(selectBatch);
                     finalBatchDetailsContainer.appendChild(batchSelectionGroup);
-
-                    // Adjust main quantity input based on selected batch
                     selectBatch.addEventListener('change', function() {
                         const selectedOption = this.options[this.selectedIndex];
                         const availableQty = selectedOption.dataset.availableQty;
                         const mainQtyInput = document.getElementById('transfer-quantity');
                         if (availableQty) {
                             mainQtyInput.max = availableQty;
-                            mainQtyInput.value = ''; // Clear previous quantity
+                            mainQtyInput.value = ''; 
                             mainQtyInput.placeholder = `Max: ${availableQty}`;
                         } else {
-                            mainQtyInput.max = data.availableQuantity; // Reset to total if no batch selected
+                            mainQtyInput.max = data.availableQuantity; 
                             mainQtyInput.placeholder = '';
                         }
                     });
-
                 } else {
                     finalBatchDetailsContainer.innerHTML = '<p class="text-muted">No specific batches found or available for this item in this warehouse.</p>';
                 }
@@ -576,22 +556,15 @@ function showInternalTransferMemo(data) {
             finalBatchDetailsContainer.innerHTML = '<p class="text-danger">Error: Batch details API not available.</p>';
         }
     }
-    // --- End: Dynamically add batch details container and fetch data ---
 
     modal.style.display = 'block';
-
-    // Attach event listeners for this instance of the modal
     const submitBtn = document.getElementById('submit-internal-transfer-btn');
     const cancelBtn = document.getElementById('cancel-internal-transfer-btn');
     const closeModalBtn = document.getElementById('close-internal-transfer-modal-btn');
-
-    // Remove old listeners before adding new ones to prevent multiple triggers
-    submitBtn.replaceWith(submitBtn.cloneNode(true)); // Clone to remove listeners
+    submitBtn.replaceWith(submitBtn.cloneNode(true)); 
     document.getElementById('submit-internal-transfer-btn').addEventListener('click', handleInternalTransferSubmit);
-    
     cancelBtn.replaceWith(cancelBtn.cloneNode(true));
     document.getElementById('cancel-internal-transfer-btn').addEventListener('click', closeInternalTransferModal);
-
     closeModalBtn.replaceWith(closeModalBtn.cloneNode(true));
     document.getElementById('close-internal-transfer-modal-btn').addEventListener('click', closeInternalTransferModal);
 }
@@ -600,27 +573,16 @@ function closeInternalTransferModal() {
     const modal = document.getElementById('internal-transfer-modal');
     if (modal) {
         modal.style.display = 'none';
-        // Optionally, reset the batch details container when modal is closed
         const batchDetailsContainer = document.getElementById('transfer-batch-details-container');
         if (batchDetailsContainer) {
-            // batchDetailsContainer.innerHTML = '<p id="transfer-batch-loading-message" class="text-muted">Loading batch details...</p>';
-            // Or remove it entirely if it's always recreated:
-            // if (batchDetailsContainer.previousSibling && batchDetailsContainer.previousSibling.nodeName === 'H5') {
-            //     batchDetailsContainer.previousSibling.remove(); 
-            // }
-            // if (batchDetailsContainer.previousSibling && batchDetailsContainer.previousSibling.nodeName === 'HR') {
-            //    batchDetailsContainer.previousSibling.remove();
-            // }
-            // batchDetailsContainer.remove();
-            // For now, let's just clear it, as it's recreated or repopulated on show.
              batchDetailsContainer.innerHTML = '';
         }
         const mainQtyInput = document.getElementById('transfer-quantity');
         if(mainQtyInput) {
-            mainQtyInput.placeholder = ''; // Clear placeholder
+            mainQtyInput.placeholder = ''; 
         }
     }
-    currentTransferData = {}; // Clear stored data
+    currentTransferData = {}; 
 }
 
 async function handleInternalTransferSubmit() {
@@ -629,12 +591,13 @@ async function handleInternalTransferSubmit() {
     }
     const quantityInput = document.getElementById('transfer-quantity');
     const destinationSelect = document.getElementById('transfer-destination-warehouse');
-    const errorMessageDiv = document.getElementById('internal-transfer-error-message'); // This is for modal-internal errors
+    const errorMessageDiv = document.getElementById('internal-transfer-error-message'); 
     const batchSelect = document.getElementById('transfer-select-batch'); 
 
     const quantityToTransfer = parseInt(quantityInput.value, 10);
     const destinationWarehouseId = destinationSelect.value;
-    const { productCode, productName, packaging, sourceWarehouseId, availableQuantity } = currentTransferData;
+    // currentTransferData.productCode is already product_code from the row's dataset
+    const { productCode, productName, packaging, sourceWarehouseId, availableQuantity } = currentTransferData; 
     
     let selectedBatchNo = null;
     let selectedBatchDocId = null; 
@@ -680,11 +643,11 @@ async function handleInternalTransferSubmit() {
     }
 
     const operatorId = sessionStorage.getItem('loggedInUser') || 'unknown_operator'; 
-    const productId = currentTransferData.productId || null; 
+    const productId = currentTransferData.productId || null; // Assuming productId might be added to currentTransferData later
 
     const transferPayload = {
         productId, 
-        productCode,
+        product_code: productCode, // Ensure API receives product_code
         productName,
         packaging, 
         sourceWarehouseId,
@@ -706,7 +669,8 @@ async function handleInternalTransferSubmit() {
         if (!window.transactionAPI || typeof window.transactionAPI.performInternalTransfer !== 'function') {
             throw new Error("Internal transfer API function is not available.");
         }
-        await window.transactionAPI.performInternalTransfer(transferPayload);
+        // Pass product_code to performInternalTransfer
+        await window.transactionAPI.performInternalTransfer(transferPayload); 
         if (typeof window.displayPageMessage === 'function') {
             window.displayPageMessage('Internal transfer submitted successfully!', 'success', 3000);
         } else {
@@ -717,9 +681,7 @@ async function handleInternalTransferSubmit() {
         fetchDataAndDisplayInventory(); 
     } catch (error) {
         console.error("[handleInternalTransferSubmit] Error performing internal transfer:", error);
-        // Display error within the modal first
         errorMessageDiv.textContent = `Transfer Error: ${error.message || 'Unknown error'}`;
-        // Also display a global page message for higher visibility if the modal error isn't noticed
         if (typeof window.displayPageMessage === 'function') {
             window.displayPageMessage(`Transfer Error: ${error.message || 'Unknown error'}`, 'error');
         }
