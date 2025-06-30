@@ -14,11 +14,11 @@ const firebaseConfig = {
 // import { getFirestore } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
 
 const app = firebase.initializeApp(firebaseConfig); // Using global firebase from CDN
-const db = firebase.firestore(); // Using global firebase.firestore from CDN, compat version
+// const db = firebase.firestore(); // Firestore instance for inventory/transactions is no longer needed here.
+                                  // Other Firebase services like Auth are still initialized by the app instance.
 
-// Make db available, e.g., by attaching to window if not using modules,
-// or prepare for export if you switch to modules later.
-window.db = db; // Commented out as product operations are moving to Supabase.
-                  // If other Firestore collections are used, this might need to be handled differently.
+// window.db = db; // Firestore instance for inventory/transactions is no longer exposed globally from here.
+                  // If other parts of the app still use Firestore directly via window.db for other collections,
+                  // this would need careful conditional initialization.
 
-console.log('Firebase initialized. Firestore instance created and window.db is now globally assigned.');
+console.log('Firebase app initialized (Auth may still be in use). Firestore for inventory/transactions is being replaced by Supabase.');
