@@ -145,9 +145,9 @@ function renderTransactionsTable(transactions) {
                     ${getTransactionTypeText(tx.type)}
                 </span>
             </td>
-            <td>${tx.productCode || '-'}</td>
-            <td>${tx.productName || '-'}</td>
-            <td>${tx.warehouseId || '-'}</td>
+            <td>${tx.product_code || '-'}</td>
+            <td>${tx.product_name || '-'}</td>
+            <td>${tx.warehouse_id || '-'}</td>
             <td class="${(tx.type === 'inbound' || tx.type === 'initial') ? 'text-success' : 'text-danger'}">
                 ${(tx.type === 'inbound' || tx.type === 'initial') ? '+' : '-'}${tx.quantity}
             </td>
