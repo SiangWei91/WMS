@@ -359,136 +359,191 @@ async function syncOfflineQueue() {
         console.log("Offline. Sync deferred.");
         return;
     }
-    if (!window.db) {
-        console.warn("Firestore 'db' instance not available. Sync deferred.");
+    // Check for Supabase client instead of Firestore db
+    if (!window.supabaseClient) {
+        console.warn("Supabase client instance not available. Sync deferred.");
         return;
     }
     if (!window.indexedDBManager) {
-        // console.warn("IndexedDBManager not available. Sync deferred."); // Already logged by ensureDbManager if called
         return;
     }
 
-    console.log("Attempting to sync offline queue...");
+    console.log("Attempting to sync offline queue to Supabase...");
     const queueStoreName = window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE;
     let pendingOperations;
     try {
         pendingOperations = await window.indexedDBManager.getAllItems(queueStoreName);
     } catch (error) {
-        console.error("Sync: Error fetching items from offline queue:", error);
+        console.error("Sync (Supabase): Error fetching items from offline queue:", error);
         return;
     }
 
     if (!pendingOperations || pendingOperations.length === 0) {
-        console.log("Sync: Offline queue is empty.");
+        console.log("Sync (Supabase): Offline queue is empty.");
         return;
     }
 
-    console.log(`Sync: Found ${pendingOperations.length} item(s) in the offline queue.`);
+    console.log(`Sync (Supabase): Found ${pendingOperations.length} item(s) in the offline queue.`);
 
     for (const op of pendingOperations.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))) {
         let success = false;
-        console.log(`Sync: Processing op ID ${op.id} - ${op.operation} on ${op.storeName}`);
+        console.log(`Sync (Supabase): Processing op ID ${op.id} - ${op.operation} on ${op.storeName}`);
         try {
-            if (op.storeName === window.indexedDBManager.STORE_NAMES.PRODUCTS) {
-                const productPayload = op.payload;
-                const itemId = op.itemId || (productPayload ? productPayload.id : null);
+            // Payloads in op.payload are expected to be in JS object format.
+            // They need to be mapped to Supabase column names before sending.
+
+            if (op.storeName === STORE_NAMES.PRODUCTS) {
+                const jsProductPayload = op.payload; // JS object
+                const itemId = op.itemId || (jsProductPayload ? jsProductPayload.id : null) || op.localId; // Prefer itemId (actual DB ID), then payload.id, then localId
+
+                // Map JS object to Supabase object using productAPI's helper if available, or a local one
+                const supabaseData = window.productAPI && typeof window.productAPI.jsToSupabaseProduct === 'function' 
+                    ? window.productAPI.jsToSupabaseProduct(jsProductPayload) 
+                    : jsToSupabaseProductPayload(jsProductPayload); // Fallback to a local mapper
 
                 if (op.operation === 'add') {
-                    const firestoreData = { ...productPayload };
-                    delete firestoreData.id; delete firestoreData.pendingSync;
-                    if (firestoreData.createdAt) firestoreData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-                    if (firestoreData.updatedAt) delete firestoreData.updatedAt;
+                    // Remove localId if it was part of the payload sent to Supabase
+                    // productCode is the PK for products table.
+                    if (supabaseData.id) delete supabaseData.id; // IDB's local_... id
                     
-                    const docRef = await window.db.collection('products').add(firestoreData);
-                    const originalLocalItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productPayload.id);
-                    if (originalLocalItem) {
-                        await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productPayload.id);
-                        originalLocalItem.id = docRef.id; originalLocalItem.pendingSync = false;
-                        await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, originalLocalItem);
-                    } else {
-                         const newItemWithFirestoreId = { ...firestoreData, id: docRef.id, createdAt: new Date().toISOString()};
-                         await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, newItemWithFirestoreId);
+                    const { data: newSupabaseProduct, error } = await window.supabaseClient
+                        .from('products')
+                        .insert(supabaseData) // supabaseData should have productCode
+                        .select()
+                        .single();
+                    if (error) throw error;
+                    
+                    // Update IndexedDB with the confirmed data from Supabase (especially the actual ID if it was local)
+                    const syncedJsProduct = window.productAPI && typeof window.productAPI.supabaseToJsProduct === 'function'
+                        ? window.productAPI.supabaseToJsProduct(newSupabaseProduct)
+                        : supabaseToJsProductPayload(newSupabaseProduct); // Fallback mapper
+                    
+                    if (op.localId) { // If it was a truly new item created offline
+                        await window.indexedDBManager.deleteItem(STORE_NAMES.PRODUCTS, op.localId);
+                         // Add with the ID from Supabase (which should be productCode)
+                        await window.indexedDBManager.addItem(STORE_NAMES.PRODUCTS, { ...syncedJsProduct, pendingSync: false });
+                        console.log(`Sync (Supabase): Product ADD success - local ${op.localId} synced as ${syncedJsProduct.id}`);
+                    } else if (itemId) { // Should not happen for add if localId was used
+                         await window.indexedDBManager.updateItem(STORE_NAMES.PRODUCTS, { ...syncedJsProduct, pendingSync: false });
+                         console.log(`Sync (Supabase): Product ADD (idempotent) success for ${syncedJsProduct.id}`);
                     }
                     success = true;
-                    console.log(`Sync: Product ADD success - local ${productPayload.id} to FS ID ${docRef.id}`);
                 } else if (op.operation === 'update' && itemId) {
-                    const firestoreUpdateData = { ...productPayload };
-                    delete firestoreUpdateData.id; delete firestoreUpdateData.pendingSync;
-                    firestoreUpdateData.updatedAt = firebase.firestore.FieldValue.serverTimestamp();
-                    await window.db.collection('products').doc(itemId).update(firestoreUpdateData);
-                    const productInDb = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, itemId);
+                    // For update, itemId should be the productCode
+                    delete supabaseData.productCode; // Cannot update primary key
+                    delete supabaseData.id; // remove local id if present
+                    const { error } = await window.supabaseClient
+                        .from('products')
+                        .update(supabaseData)
+                        .eq('productCode', itemId); // Filter by productCode
+                    if (error) throw error;
+                    const productInDb = await window.indexedDBManager.getItem(STORE_NAMES.PRODUCTS, itemId);
                     if (productInDb) {
-                        productInDb.pendingSync = false;
-                        await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productInDb);
+                        await window.indexedDBManager.updateItem(STORE_NAMES.PRODUCTS, {...productInDb, ...jsProductPayload, pendingSync: false });
                     }
                     success = true;
-                    console.log(`Sync: Product UPDATE success for ID ${itemId}`);
+                    console.log(`Sync (Supabase): Product UPDATE success for productCode ${itemId}`);
                 } else if (op.operation === 'delete' && itemId) {
-                    await window.db.collection('products').doc(itemId).delete();
+                    const { error } = await window.supabaseClient.from('products').delete().eq('productCode', itemId);
+                    if (error) throw error;
+                    // Item already deleted from IDB
                     success = true;
-                    console.log(`Sync: Product DELETE success for ID ${itemId}`);
+                    console.log(`Sync (Supabase): Product DELETE success for productCode ${itemId}`);
                 }
-            } else if (op.storeName === 'transactions' && (op.operation === 'inbound' || op.operation === 'outbound')) {
-                const firestorePayload = { ...op.payload };
-                delete firestorePayload.id; delete firestorePayload.pendingSync; delete firestorePayload.transactionDate;
-                if (op.operation === 'inbound') await window.transactionAPI.inboundStock(firestorePayload);
-                else if (op.operation === 'outbound') await window.transactionAPI.outboundStock(firestorePayload);
-                success = true;
-                console.log(`Sync: ${op.operation.toUpperCase()} transaction success for product ${op.payload.productCode}`);
-            } else if (op.storeName === window.indexedDBManager.STORE_NAMES.SHIPMENTS) {
-                const shipmentPayload = op.payload;
-                const shipmentId = op.itemId || (shipmentPayload ? shipmentPayload.id : null);
+
+            } else if (op.storeName === STORE_NAMES.TRANSACTIONS) {
+                // transactionAPI's inbound/outbound already handle online/offline and mapping
+                // The payload here should be the raw data for these functions.
+                // We just need to ensure these API functions are called.
+                // The API functions themselves will perform the Supabase operation.
+                const txData = op.payload; // This is JS object
+                if (op.operation === 'inbound' && window.transactionAPI && typeof window.transactionAPI.inboundStock === 'function') {
+                    await window.transactionAPI.inboundStock(txData); // This will handle Supabase interaction
+                    success = true;
+                } else if (op.operation === 'outbound' && window.transactionAPI && typeof window.transactionAPI.outboundStock === 'function') {
+                    await window.transactionAPI.outboundStock(txData); // This will handle Supabase interaction
+                    success = true;
+                }
+                 if (success) console.log(`Sync (Supabase): Transaction ${op.operation} for ${txData.productCode} delegated to API.`);
+
+
+            } else if (op.storeName === STORE_NAMES.SHIPMENTS) {
+                // Similar to transactions, use shipmentAPI methods which are now Supabase-aware
+                const shipmentJsPayload = op.payload;
+                const shipmentId = op.itemId || (shipmentJsPayload ? shipmentJsPayload.id : null) || op.localId;
+
                 if (op.operation === 'add') {
-                    const firestorePayload = { ...shipmentPayload };
-                    delete firestorePayload.id; delete firestorePayload.pendingSync; delete firestorePayload.createdAt;
-                    const newShipment = await window.shipmentAPI.addShipment(firestorePayload); // Relies on API to handle IDB update correctly
-                    if (shipmentPayload.id && shipmentPayload.id.startsWith('local_shipment_')) {
-                        await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.SHIPMENTS, shipmentPayload.id);
+                    // shipmentAPI.addShipment expects JS payload, returns JS payload
+                    const newSyncedShipment = await window.shipmentAPI.addShipment(shipmentJsPayload);
+                     if (op.localId && newSyncedShipment.id !== op.localId) {
+                        // If API created a new ID (from Supabase), update IDB
+                        await window.indexedDBManager.deleteItem(STORE_NAMES.SHIPMENTS, op.localId);
+                        await window.indexedDBManager.addItem(STORE_NAMES.SHIPMENTS, { ...newSyncedShipment, pendingSync: false });
+                    } else {
+                        await window.indexedDBManager.updateItem(STORE_NAMES.SHIPMENTS, { ...newSyncedShipment, pendingSync: false });
                     }
                     success = true;
-                    console.log(`Sync: Shipment ADD success, new ID: ${newShipment.id}`);
+                    console.log(`Sync (Supabase): Shipment ADD success, new/synced ID: ${newSyncedShipment.id}`);
                 } else if (op.operation === 'update' && shipmentId) {
-                    const firestorePayload = { ...shipmentPayload };
-                    delete firestorePayload.id; delete firestorePayload.pendingSync;
-                    await window.shipmentAPI.updateShipment(shipmentId, firestorePayload);
+                    await window.shipmentAPI.updateShipment(shipmentId, shipmentJsPayload); // API handles IDB update
                     success = true;
-                    console.log(`Sync: Shipment UPDATE success for ID ${shipmentId}`);
+                    console.log(`Sync (Supabase): Shipment UPDATE success for ID ${shipmentId}`);
                 } else if (op.operation === 'delete' && shipmentId) {
-                    await window.shipmentAPI.deleteShipment(shipmentId);
+                    await window.shipmentAPI.deleteShipment(shipmentId); // API handles IDB update
                     success = true;
-                    console.log(`Sync: Shipment DELETE success for ID ${shipmentId}`);
+                    console.log(`Sync (Supabase): Shipment DELETE success for ID ${shipmentId}`);
                 }
             } else if (op.storeName === 'shipment_excel_file' && op.operation === 'process_excel_shipment') {
                 if (window.shipmentProcessor && typeof window.shipmentProcessor.processQueuedShipmentData === 'function') {
+                    // This function is already updated to use Supabase directly for its operations
                     const result = await window.shipmentProcessor.processQueuedShipmentData(
                         op.payload.allExtractedData, op.payload.containerNumber, op.payload.storedDate
                     );
                     if (result.success) {
                         success = true;
-                        console.log(`Sync: Queued Excel shipment processed. ${result.message}`);
+                        console.log(`Sync (Supabase): Queued Excel shipment processed. ${result.message}`);
                     } else {
-                        console.error(`Sync: Error processing queued Excel shipment: ${result.message || 'Unknown processor error.'}`);
+                        console.error(`Sync (Supabase): Error processing queued Excel shipment: ${result.message || 'Unknown processor error.'}`);
                     }
                 } else {
-                    console.error("Sync: shipmentProcessor.processQueuedShipmentData unavailable.");
+                    console.error("Sync (Supabase): shipmentProcessor.processQueuedShipmentData unavailable.");
                 }
             }
 
+
             if (success) {
                 await window.indexedDBManager.deleteItem(queueStoreName, op.id);
-                console.log(`Successfully synced operation ID ${op.id} and removed from queue.`);
+                console.log(`Sync (Supabase): Successfully synced operation ID ${op.id} and removed from queue.`);
             } else {
-                console.warn(`Operation ID ${op.id} could not be processed (unsupported type or missing data). It remains in queue.`);
+                console.warn(`Sync (Supabase): Operation ID ${op.id} could not be processed (unsupported type or error). It remains in queue.`);
             }
 
         } catch (error) {
-            console.error(`Failed to sync operation ID ${op.id} (${op.operation} on ${op.storeName}):`, error);
-            // Optionally, implement a retry counter or move to a "failed_sync_ops" store after N retries.
-            // For now, it stays in the queue and will be retried next time.
+            console.error(`Sync (Supabase): Failed to sync operation ID ${op.id} (${op.operation} on ${op.storeName}):`, error);
         }
     }
-    console.log("Offline queue sync attempt finished.");
+    console.log("Offline queue sync attempt (Supabase) finished.");
 }
+
+// Fallback mappers if not found on productAPI (should ideally not be needed if productAPI is well-defined)
+function jsToSupabaseProductPayload(jsProduct) {
+    if (!jsProduct) return null;
+    return {
+        productCode: jsProduct.productCode, name: jsProduct.name, packaging: jsProduct.packaging,
+        ChineseName: jsProduct['Chinese Name'], group: jsProduct.group, brand: jsProduct.brand,
+        // created_at, updated_at are typically handled by db
+    };
+}
+function supabaseToJsProductPayload(supabaseProduct) {
+    if (!supabaseProduct) return null;
+    return {
+        id: supabaseProduct.productCode, productCode: supabaseProduct.productCode, name: supabaseProduct.name,
+        packaging: supabaseProduct.packaging, 'Chinese Name': supabaseProduct.ChineseName,
+        group: supabaseProduct.group, brand: supabaseProduct.brand, createdAt: supabaseProduct.created_at,
+        updatedAt: supabaseProduct.updated_at,
+    };
+}
+
 
 // Listen for online/offline status changes
 window.addEventListener('online', syncOfflineQueue);
