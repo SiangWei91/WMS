@@ -8,11 +8,11 @@ let supabaseProductSubscription = null; // For Supabase real-time subscription
 // Helper function to map Supabase row to JS object
 function supabaseToJsProduct(supabaseProduct) {
     if (!supabaseProduct) return null;
-    // Assuming Supabase columns are: productCode, created_at, name, packaging, ChineseName, group, brand
-    // And 'id' for IndexedDB should come from 'productCode'
+    // Assuming Supabase columns are: product_code, created_at, name, packaging, ChineseName, group, brand
+    // And 'id' for IndexedDB should come from 'product_code'
     return {
-        id: supabaseProduct.productCode, // Use productCode from Supabase as the ID for IndexedDB
-        productCode: supabaseProduct.productCode,
+        id: supabaseProduct.product_code, // Use product_code from Supabase as the ID for IndexedDB
+        product_code: supabaseProduct.product_code, // CHANGED
         name: supabaseProduct.name,
         'Chinese Name': supabaseProduct.ChineseName, // Corrected mapping
         packaging: supabaseProduct.packaging,
@@ -30,8 +30,8 @@ function jsToSupabaseProduct(jsProduct) {
     if (!jsProduct) return null;
     // Ensure these JS property names match what's in your jsProduct objects
     const supabaseData = {
-        // id is not a Supabase column based on provided list, productCode is
-        productCode: jsProduct.productCode, // Map to Supabase 'productCode'
+        // id is not a Supabase column based on provided list, product_code is
+        product_code: jsProduct.product_code, // Map to Supabase 'product_code' // CHANGED
         name: jsProduct.name,
         ChineseName: jsProduct['Chinese Name'], // Map to Supabase 'ChineseName'
         packaging: jsProduct.packaging,
@@ -56,7 +56,7 @@ const productAPI_supabase = {
             const { data, error } = await window.supabaseClient
                 .from('products')
                 .select('*')
-                .order('productCode', { ascending: true }); // Use Supabase column name
+                .order('product_code', { ascending: true }); // Use Supabase column name 'product_code' // CHANGED
 
             if (error) throw error;
 
@@ -73,12 +73,12 @@ const productAPI_supabase = {
                 } else {
                     invalidProductsFound++;
                     // p is the problematic mapped object. data[index] is the original Supabase row object.
-                    console.warn('Product with invalid or missing ID (derived from productCode) excluded from IndexedDB. Mapped object:', p, 'Original Supabase data row:', data[index]);
+                    console.warn('Product with invalid or missing ID (derived from product_code) excluded from IndexedDB. Mapped object:', p, 'Original Supabase data row:', data[index]); // CHANGED
                 }
             });
 
             if (invalidProductsFound > 0) {
-                console.error(`Excluded ${invalidProductsFound} products from IndexedDB due to missing or invalid IDs. See warnings above. Please check data integrity in Supabase.`);
+                console.error(`Excluded ${invalidProductsFound} products from IndexedDB due to missing or invalid IDs. See warnings above. Please check data integrity in Supabase.`); // Note: ID here refers to the 'id' field in JS objects, derived from product_code
             }
 
             await window.indexedDBManager.clearStore(window.indexedDBManager.STORE_NAMES.PRODUCTS);
@@ -131,7 +131,7 @@ const productAPI_supabase = {
                         if (searchTerm.trim() !== '') {
                             const lowerCaseSearchTerm = searchTerm.trim().toLowerCase();
                             let match = false;
-                            if (product.productCode && product.productCode.toLowerCase().includes(lowerCaseSearchTerm)) match = true;
+                            if (product.product_code && product.product_code.toLowerCase().includes(lowerCaseSearchTerm)) match = true; // CHANGED
                             if (!match && product.name && product.name.toLowerCase().includes(lowerCaseSearchTerm)) match = true;
                             if (!match && product['Chinese Name'] && product['Chinese Name'].toLowerCase().includes(lowerCaseSearchTerm)) match = true;
                             if (match) {
@@ -148,8 +148,8 @@ const productAPI_supabase = {
                 countRequest.onerror = event => rejectCount(event.target.error);
             });
             
-            // Fetch paginated results using 'productCode' index from IndexedDB
-            const index = store.index('productCode'); // This is JS property name 'productCode'
+            // Fetch paginated results using 'product_code' index from IndexedDB
+            const index = store.index('product_code'); // This is JS property name 'product_code' // CHANGED
             const paginatedRequest = index.openCursor(null, 'next'); 
 
             await new Promise((resolveCursor, rejectCursor) => {
@@ -161,7 +161,7 @@ const productAPI_supabase = {
                         if (searchTerm.trim() !== '') {
                             const lowerCaseSearchTerm = searchTerm.trim().toLowerCase();
                             isMatch = false;
-                            if (product.productCode && product.productCode.toLowerCase().includes(lowerCaseSearchTerm)) isMatch = true;
+                            if (product.product_code && product.product_code.toLowerCase().includes(lowerCaseSearchTerm)) isMatch = true; // CHANGED
                             if (!isMatch && product.name && product.name.toLowerCase().includes(lowerCaseSearchTerm)) isMatch = true;
                             if (!isMatch && product['Chinese Name'] && product['Chinese Name'].toLowerCase().includes(lowerCaseSearchTerm)) isMatch = true;
                         }
@@ -199,7 +199,7 @@ const productAPI_supabase = {
             }
 
             return {
-                data: results, // Already sorted by productCode due to IndexedDB index cursor
+                data: results, // Already sorted by product_code due to IndexedDB index cursor // CHANGED
                 pagination: {
                     currentPage: page,
                     itemsPerPage: limit,
@@ -276,21 +276,22 @@ const productAPI_supabase = {
             const { data: supabaseProductRow, error } = await window.supabaseClient
                 .from('products')
                 .select('*')
-                .eq('id', productId)
+                .eq('product_code', productId) // CHANGED: productId here is the product_code value
                 .single();
 
             if (error) {
                 if (error.code === 'PGRST116') { 
-                     console.log("No such product document in Supabase!");
+                     console.log(`No product found in Supabase with product_code: ${productId}`); // CHANGED
                      return null;
                 }
                 throw error;
             }
 
             if (supabaseProductRow) {
-                const jsProduct = supabaseToJsProduct(supabaseProductRow);
+                const jsProduct = supabaseToJsProduct(supabaseProductRow); // This will map to js object with product_code
                 jsProduct.pendingSync = false;
-                await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, jsProduct);
+                // Ensure jsProduct.id (which is product_code) is used for IDB update
+                await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, jsProduct); 
                 return jsProduct;
             }
             return null;
@@ -335,15 +336,16 @@ const productAPI_supabase = {
                 const { data: updatedSupabaseProductRow, error } = await window.supabaseClient
                     .from('products')
                     .update(payloadForSupabase)
-                    .eq('productCode', productId) // Corrected: Use 'productCode' for the .eq() clause
+                    .eq('product_code', productId) // CHANGED: productId here is the product_code value. Column is 'product_code'.
                     .select()
                     .single();
 
                 if (error) throw error;
 
-                const syncedProduct = supabaseToJsProduct(updatedSupabaseProductRow);
+                const syncedProduct = supabaseToJsProduct(updatedSupabaseProductRow); // This maps to js object with product_code
                 syncedProduct.pendingSync = false;
-                await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, syncedProduct);
+                // Ensure syncedProduct.id (which is product_code) is used for IDB update
+                await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, syncedProduct); 
                 console.log("Product updated in Supabase and IndexedDB (online):", syncedProduct);
                 return syncedProduct;
             } else {
@@ -378,12 +380,13 @@ const productAPI_supabase = {
                 const { error } = await window.supabaseClient
                     .from('products')
                     .delete()
-                    .eq('id', productId);
+                    .eq('product_code', productId); // CHANGED: productId here is the product_code value
 
                 if (error) throw error;
 
+                // productId is the product_code, which is also the 'id' key for IndexedDB objects
                 await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productId);
-                console.log("Product deleted from Supabase and IndexedDB (online):", productId);
+                console.log("Product deleted from Supabase and IndexedDB (online), product_code:", productId); // CHANGED
                 return { id: productId, deleted: true };
             } else {
                 await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productId);
@@ -402,17 +405,17 @@ const productAPI_supabase = {
         }
     },
 
-    async getProductByCode(productCodeJS) { // productCodeJS is the JS value
+    async getProductByCode(product_code_js) { // product_code_js is the JS value // CHANGED
         try {
             await ensureDbManager(); 
-            const trimmedCode = productCodeJS.trim();
-            // Try IndexedDB first (uses JS field name 'productCode')
+            const trimmedCode = product_code_js.trim(); // CHANGED
+            // Try IndexedDB first (uses JS field name 'product_code')
             const productsFromDB = await window.indexedDBManager.getItemsByIndex(
                 window.indexedDBManager.STORE_NAMES.PRODUCTS, 
-                'productCode', 
+                'product_code', // CHANGED (index name)
                 trimmedCode
             );
-            // productsFromDB contains JS objects
+            // productsFromDB contains JS objects (now with product_code property)
             if (productsFromDB && productsFromDB.length > 0 && !productsFromDB[0].pendingSync) {
                 console.log("Product fetched from IndexedDB by code:", trimmedCode);
                 return productsFromDB[0];
@@ -424,22 +427,23 @@ const productAPI_supabase = {
             const { data: supabaseProductRow, error } = await window.supabaseClient
                 .from('products')
                 .select('*')
-                .eq('productCode', trimmedCode) // CORRECTED: Use Supabase column name 'productCode' (camelCase)
+                .eq('product_code', trimmedCode) // CHANGED: Use Supabase column name 'product_code'
                 .maybeSingle(); 
 
             if (error) throw error;
             
             if (supabaseProductRow) {
-                const jsProduct = supabaseToJsProduct(supabaseProductRow);
+                const jsProduct = supabaseToJsProduct(supabaseProductRow); // Maps to JS object with product_code
                 jsProduct.pendingSync = false;
-                await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, jsProduct);
+                // jsProduct.id is the product_code, which is the key for IDB
+                await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, jsProduct); 
                 return jsProduct;
             } else {
                  console.warn(`Product with code ${trimmedCode} not found in Supabase.`);
                 return null;
             }
         } catch (error) {
-            console.error(`Error fetching product by code ${productCodeJS}:`, error);
+            console.error(`Error fetching product by code ${product_code_js}:`, error); // CHANGED
             throw error;
         }
     },
