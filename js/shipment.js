@@ -52,101 +52,116 @@ function reformatDateToDDMMYYYY(dateStr) {
     return dateStr; 
 }
 
-async function lookupOrCreateProduct(itemCode, excelProductDescription, excelPackingSize, isOnline, firestoreBatchForOnlineAdds = null) {
+// Updated lookupOrCreateProduct to use productAPI (Supabase-aware) and remove Firestore batch logic
+// The 'isOnline' parameter is removed as productAPI.addProduct now handles online/offline logic internally.
+// The 'firestoreBatchForOnlineAdds' parameter is removed as it's Firestore-specific.
+async function lookupOrCreateProduct(itemCode, excelProductDescription, excelPackingSize) {
     if (!itemCode) {
-        console.warn("lookupOrCreateProduct: itemCode is missing.");
-        return { productName: excelProductDescription, packingSize: excelPackingSize, isNew: false, error: 'Missing itemCode', productId: null };
+        console.warn("lookupOrCreateProduct (shipment.js): itemCode is missing.");
+        return { productName: excelProductDescription, packingSize: excelPackingSize, isNew: false, error: 'Missing itemCode', productId: null, productCode: itemCode };
     }
 
-    if (!window.productAPI) {
-        console.error("lookupOrCreateProduct: productAPI is not available.");
-        return { productName: excelProductDescription, packingSize: excelPackingSize, isNew: false, error: 'productAPI not available', productId: null };
+    // Ensure productAPI and its necessary methods are available
+    if (!window.productAPI || typeof window.productAPI.getProductByCode !== 'function' || typeof window.productAPI.addProduct !== 'function') {
+        console.error("lookupOrCreateProduct (shipment.js): productAPI or its methods are not available.");
+        return { productName: excelProductDescription, packingSize: excelPackingSize, isNew: false, error: 'productAPI not available', productId: null, productCode: itemCode };
     }
 
     try {
+        // productAPI.getProductByCode is already Supabase-aware and handles IndexedDB caching.
         let product = await window.productAPI.getProductByCode(itemCode);
 
         if (product) {
+            // Product exists, use its details.
+            // The product object from productAPI is already in the desired JS format.
             return {
-                productId: product.id,
-                productName: product.name || excelProductDescription,
-                packingSize: product.packaging || excelPackingSize,
-                isNew: false
+                productId: product.id, // This 'id' is typically the productCode itself from productAPI's mapping
+                productCode: product.productCode,
+                productName: product.name || excelProductDescription, // Fallback to Excel desc if name is missing
+                packingSize: product.packaging || excelPackingSize, // Fallback to Excel packing if missing
+                isNew: false // Product was found, not new
             };
         } else {
+            // Product does not exist, create it using productAPI.addProduct.
             const newProductData = {
-                productCode: itemCode,
+                productCode: itemCode, // This is the primary identifier
                 name: excelProductDescription,
                 packaging: excelPackingSize
+                // Consider adding other fields like ChineseName, group, brand if available from Excel
+                // and if your productAPI.addProduct and Supabase 'products' table schema support them.
             };
-
-            if (isOnline && firestoreBatchForOnlineAdds && window.db) { 
-                console.log("lookupOrCreateProduct: Online - adding product directly to Firestore batch.");
-                const productsRef = window.db.collection('products');
-                const newProductRef = productsRef.doc(); 
-                firestoreBatchForOnlineAdds.set(newProductRef, {
-                    ...newProductData,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                const productForIDB = { ...newProductData, id: newProductRef.id, createdAt: new Date().toISOString() };
-                // No need to await this if it's just for cache consistency and main flow depends on FS batch
-                window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.PRODUCTS, productForIDB)
-                    .catch(err => console.error("Error updating IDB for new product in batch:", err));
-                return {
-                    productId: newProductRef.id,
-                    productName: excelProductDescription,
-                    packingSize: excelPackingSize,
-                    isNew: true
-                };
-            } else { // Handles both offline, and online without a pre-existing batch
-                console.log(`lookupOrCreateProduct: ${isOnline ? 'Online (no batch)' : 'Offline'} - using productAPI.addProduct.`);
-                const addedProduct = await window.productAPI.addProduct(newProductData); 
-                return {
-                    productId: addedProduct.id, 
-                    productName: addedProduct.name,
-                    packingSize: addedProduct.packaging,
-                    isNew: true,
-                    isLocal: !isOnline // Flag if it's a locally created (queued) product
-                };
-            }
+            
+            console.log(`lookupOrCreateProduct (shipment.js): Product ${itemCode} not found, creating new via productAPI.addProduct.`);
+            // productAPI.addProduct is Supabase-aware and handles online/offline logic,
+            // including IndexedDB updates and offline queueing.
+            const addedProduct = await window.productAPI.addProduct(newProductData); 
+            
+            // The addedProduct from productAPI should be in the consistent JS format.
+            return {
+                productId: addedProduct.id, 
+                productCode: addedProduct.productCode,
+                productName: addedProduct.name,
+                packingSize: addedProduct.packaging,
+                isNew: true, // Product was newly created
+                isLocal: addedProduct.pendingSync || false // Reflect if productAPI queued it offline
+            };
         }
     } catch (error) {
-        console.error(`Error in lookupOrCreateProduct for itemCode ${itemCode}:`, error);
+        console.error(`Error in lookupOrCreateProduct (shipment.js) for itemCode ${itemCode}:`, error);
+        // Return a structure indicating error, allowing the caller to decide how to proceed.
+        // Include original Excel data as fallbacks.
         return {
-            productName: excelProductDescription,
+            productName: excelProductDescription, 
             packingSize: excelPackingSize,
-            isNew: false,
-            error: `Product API error: ${error.message}`,
-            productId: null
+            isNew: false, // Not new if creation or lookup failed catastrophically
+            error: `Product API interaction error: ${error.message}`, // More specific error message
+            productId: null, // No valid product ID
+            productCode: itemCode // Include the itemCode for which the error occurred
         };
     }
 }
 
-async function getWarehouseInfo(db, viewDisplayName) {
-    let firestoreWarehouseId = '';
+async function getWarehouseInfo(viewDisplayName) { // Removed db parameter
+    let warehouseIdKey = ''; // This will be the key to query Supabase, e.g., 'jordon'
     switch (viewDisplayName) {
-        case 'Jordon': firestoreWarehouseId = 'jordon'; break;
-        case 'Lineage': firestoreWarehouseId = 'lineage'; break;
-        case 'Blk15': firestoreWarehouseId = 'blk15'; break;
-        case 'Coldroom 6': firestoreWarehouseId = 'coldroom6'; break;
-        case 'Coldroom 5': firestoreWarehouseId = 'coldroom5'; break;
+        case 'Jordon': warehouseIdKey = 'jordon'; break;
+        case 'Lineage': warehouseIdKey = 'lineage'; break;
+        case 'Blk15': warehouseIdKey = 'blk15'; break;
+        case 'Coldroom 6': warehouseIdKey = 'coldroom6'; break;
+        case 'Coldroom 5': warehouseIdKey = 'coldroom5'; break;
         default:
-            return { firestoreWarehouseId: viewDisplayName.toLowerCase().replace(/\s+/g, ''), warehouseType: 'unknown', error: `No mapping for view: ${viewDisplayName}` };
+            const generatedId = viewDisplayName.toLowerCase().replace(/\s+/g, '');
+            console.warn(`getWarehouseInfo: No direct mapping for view display name "${viewDisplayName}". Using generated ID "${generatedId}" for query.`);
+            warehouseIdKey = generatedId; 
+            // return { warehouseId: generatedId, warehouseType: 'unknown', error: `No mapping for view: ${viewDisplayName}` };
     }
 
-    if (!db) return { firestoreWarehouseId, warehouseType: 'unknown', error: 'Firestore db instance not provided to getWarehouseInfo' };
+    if (!window.supabaseClient) {
+        return { warehouseId: warehouseIdKey, warehouseType: 'unknown', error: 'Supabase client not available for getWarehouseInfo' };
+    }
     
-    const warehouseRef = db.collection('warehouses').doc(firestoreWarehouseId);
     try {
-        const warehouseDoc = await warehouseRef.get();
-        if (warehouseDoc.exists) {
-            const warehouseData = warehouseDoc.data();
-            return { firestoreWarehouseId, warehouseType: warehouseData.type || 'unknown' };
-        } else {
-            return { firestoreWarehouseId, warehouseType: 'not_found', error: `Warehouse doc ${firestoreWarehouseId} not found` };
+        const { data: warehouseData, error } = await window.supabaseClient
+            .from('warehouses')
+            .select('id, type') // Assuming 'id' is the PK and 'type' column exists
+            .eq('id', warehouseIdKey) // Query by the determined key
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') { // Not found
+                 return { warehouseId: warehouseIdKey, warehouseType: 'not_found', error: `Warehouse doc ${warehouseIdKey} not found in Supabase` };
+            }
+            throw error; // Other Supabase errors
+        }
+        
+        if (warehouseData) {
+            return { warehouseId: warehouseData.id, warehouseType: warehouseData.type || 'unknown' };
+        } else { // Should be caught by PGRST116, but as a fallback
+            return { warehouseId: warehouseIdKey, warehouseType: 'not_found', error: `Warehouse doc ${warehouseIdKey} not found (no data returned)` };
         }
     } catch (error) {
-        return { firestoreWarehouseId, warehouseType: 'error', error: `Error fetching warehouse ${firestoreWarehouseId}: ${error.message}` };
+        console.error(`Error fetching warehouse ${warehouseIdKey} from Supabase:`, error);
+        return { warehouseId: warehouseIdKey, warehouseType: 'error', error: `Error fetching warehouse ${warehouseIdKey}: ${error.message}` };
     }
 }
 
@@ -376,13 +391,19 @@ function handleRowRemoveClick(event) {
     }
 }
 
+// Updated _processShipmentDataOnline to use Supabase client for direct inserts
 async function _processShipmentDataOnline(allExtractedData, containerNumber, storedDate) {
-    if (typeof firebase === 'undefined' || typeof firebase.firestore === 'undefined') {
-        throw new Error('Firebase service is not available.');
+    if (!window.supabaseClient) {
+        throw new Error('Supabase client is not available.');
     }
-    const db = firebase.firestore();
-    const batch = db.batch();
-    let totalItemsToUpdate = 0;
+    
+    let totalItemsProcessed = 0;
+    let successfulInserts = 0;
+    const errors = [];
+
+    // Note: Firestore batching is gone. Operations are now sequential per item.
+    // For atomicity of the whole Excel file, a Supabase Edge Function would be needed.
+    console.log("_processShipmentDataOnline (Supabase): Starting processing of Excel data.");
 
     for (const viewDef of shipmentModuleState.viewDefinitions) {
         const viewName = viewDef.name;
@@ -391,76 +412,117 @@ async function _processShipmentDataOnline(allExtractedData, containerNumber, sto
 
         if (dataForThisView && dataForThisView.length > 0) {
             for (const item of dataForThisView) {
+                totalItemsProcessed++;
                 const currentItemCode = String(item.itemCode || '').trim();
                 if (!currentItemCode) {
                     console.warn("Skipping item with empty productCode:", item, "for view:", viewDisplayName);
+                    errors.push({ item, error: "Empty productCode" });
                     continue;
                 }
 
-                const productInfo = await lookupOrCreateProduct(
-                    currentItemCode,
-                    String(item.productDescription || '').trim(),
-                    String(item.packingSize || '').trim(),
-                    true, batch 
-                );
+                try {
+                    // 1. Lookup or Create Product (uses productAPI which is Supabase-aware)
+                    const productInfo = await lookupOrCreateProduct( // No longer passes 'isOnline' or batch objects
+                        currentItemCode,
+                        String(item.productDescription || '').trim(),
+                        String(item.packingSize || '').trim()
+                    );
 
-                if (productInfo.error) console.warn(`Error processing product ${currentItemCode}: ${productInfo.error}.`);
-                
-                const warehouseDetails = await getWarehouseInfo(db, viewDisplayName);
-                if (warehouseDetails.error) console.warn(`[${viewName}] Item: ${currentItemCode}, Warehouse details error: ${warehouseDetails.error}.`);
-
-                const inventoryDoc = {
-                    productId: productInfo.productId || null,
-                    productCode: currentItemCode,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    quantity: Number(item.quantity || 0),
-                    warehouseId: warehouseDetails.firestoreWarehouseId,
-                    container: containerNumber || "",
-                    batchNo: String(item.batchNo || '').trim()
-                };
-
-                if (warehouseDetails.warehouseType === '3pl') {
-                    inventoryDoc._3plDetails = {
-                        status: "pending", lotNumber: "", palletType: "pending",
-                        location: "", dateStored: storedDate || ""
-                    };
-                    if (viewName === 'Jordon' && item.pallet !== undefined) {
-                        let numPallet = Number(String(item.pallet || '0').trim());
-                        inventoryDoc._3plDetails.pallet = isNaN(numPallet) ? 0 : numPallet;
+                    if (productInfo.error) {
+                        console.warn(`Error processing product ${currentItemCode}: ${productInfo.error}. Skipping item.`);
+                        errors.push({ item, error: `Product lookup/create error: ${productInfo.error}` });
+                        continue;
                     }
-                }
-                if (viewName === 'Jordon' && item.hasOwnProperty('excelRowNumber')) {
-                    inventoryDoc.excelRowNumber = item.excelRowNumber;
-                }
-                
-                const newInventoryDocRef = db.collection('inventory').doc();
-                batch.set(newInventoryDocRef, inventoryDoc);
-                totalItemsToUpdate++;
+                    
+                    // 2. Get Warehouse Info (uses Supabase-aware getWarehouseInfo)
+                    const warehouseDetails = await getWarehouseInfo(viewDisplayName); // No longer passes db
+                    if (warehouseDetails.error) {
+                        console.warn(`[${viewName}] Item: ${currentItemCode}, Warehouse details error: ${warehouseDetails.error}. Skipping item.`);
+                        errors.push({ item, error: `Warehouse info error: ${warehouseDetails.error}` });
+                        continue;
+                    }
 
-                const operatorName = sessionStorage.getItem('loggedInUser') || 'system_excel_import';
-                const transactionDoc = {
-                    productId: productInfo.productId || null, 
-                    productCode: inventoryDoc.productCode,
-                    productName: productInfo.productName, 
-                    warehouseId: inventoryDoc.warehouseId,
-                    quantity: inventoryDoc.quantity,
-                    batchNo: inventoryDoc.batchNo,
-                    transactionDate: firebase.firestore.FieldValue.serverTimestamp(),
-                    type: 'inbound', operatorId: operatorName, 
-                };
-                const newTransactionDocRef = db.collection('transactions').doc();
-                batch.set(newTransactionDocRef, transactionDoc);
+                    // 3. Prepare Inventory Document for Supabase
+                    const inventoryPayload = {
+                        // Assuming 'id' for inventory is auto-generated UUID by Supabase
+                        product_id: productInfo.productId, // This 'productId' from lookupOrCreateProduct is usually the productCode.
+                                                           // Ensure your 'inventory' table's 'product_id' FK correctly references 'products.productCode' or 'products.id'
+                        product_code: currentItemCode,
+                        // created_at will be set by Supabase default
+                        quantity: Number(item.quantity || 0),
+                        warehouse_id: warehouseDetails.warehouseId, // Corrected to use warehouseId from Supabase result
+                        container: containerNumber || null,
+                        batch_no: String(item.batchNo || '').trim() || null,
+                        // last_updated will be set by Supabase default or trigger
+                    };
+                    if (warehouseDetails.warehouseType === '3pl') {
+                        inventoryPayload._3pl_details = { // Ensure this column name matches Supabase
+                            status: "pending", // Default status
+                            lotNumber: "", // Default or from Excel if available
+                            palletType: "pending", // Default
+                            location: "", // Default
+                            dateStored: storedDate ? new Date(storedDate.split('/').reverse().join('-')).toISOString() : null, // Convert DD/MM/YYYY to ISO
+                            pallet: (viewName === 'Jordon' && item.pallet !== undefined) ? (Number(String(item.pallet || '0').trim()) || 0) : null
+                        };
+                    }
+                    if (viewName === 'Jordon' && item.hasOwnProperty('excelRowNumber')) {
+                        inventoryPayload.excel_row_number = item.excelRowNumber; // Ensure column name matches
+                    }
+                    
+                    const { error: invError } = await window.supabaseClient
+                        .from('inventory')
+                        .insert(inventoryPayload);
+
+                    if (invError) {
+                        console.error(`Error inserting inventory for ${currentItemCode}:`, invError);
+                        errors.push({ item, error: `Inventory insert error: ${invError.message}` });
+                        continue; // Skip creating transaction if inventory insert fails
+                    }
+                    
+                    // 4. Prepare Transaction Document for Supabase
+                    const operatorId = sessionStorage.getItem('loggedInUser') || 'system_excel_import';
+                    const transactionPayload = {
+                        // id auto-generated by Supabase
+                        product_id: productInfo.productId,
+                        product_code: inventoryPayload.product_code,
+                        product_name: productInfo.productName, 
+                        warehouse_id: inventoryPayload.warehouse_id,
+                        quantity: inventoryPayload.quantity,
+                        batch_no: inventoryPayload.batch_no, // This is product's batch_no
+                        // transaction_date will be set by Supabase default
+                        type: 'inbound', 
+                        operator_id: operatorId,
+                        description: `Inbound from Excel shipment processing. Container: ${containerNumber || 'N/A'}`
+                    };
+                    const { error: txError } = await window.supabaseClient
+                        .from('transactions')
+                        .insert(transactionPayload);
+
+                    if (txError) {
+                        console.error(`Error inserting transaction for ${currentItemCode}:`, txError);
+                        // Note: Inventory was already inserted. This highlights lack of atomicity.
+                        errors.push({ item, error: `Transaction insert error: ${txError.message} (Inventory might have been inserted)` });
+                        continue;
+                    }
+                    successfulInserts++;
+                } catch (processItemError) {
+                    console.error(`Critical error processing item ${currentItemCode} in view ${viewDisplayName}:`, processItemError);
+                    errors.push({ item, error: `General processing error: ${processItemError.message}` });
+                }
             }
         }
     }
   
-    if (totalItemsToUpdate === 0) {
-        console.log('_processShipmentDataOnline: No data to update.');
-        return { success: true, message: 'No data to update.', itemsUpdated: 0 };
+    console.log(`_processShipmentDataOnline (Supabase): Finished. Processed: ${totalItemsProcessed}, Successful inserts (inventory+transaction pairs): ${successfulInserts}, Errors: ${errors.length}`);
+    if (errors.length > 0) {
+        console.warn("Errors during Excel processing (Supabase):", errors);
+        // Could return detailed errors if needed by UI
+        return { success: false, message: `Processed ${totalItemsProcessed} items. ${successfulInserts} succeeded. ${errors.length} items had errors. Check console.`, itemsUpdated: successfulInserts, errorsEncountered: errors.length };
     }
-  
-    await batch.commit();
-    return { success: true, message: `Successfully updated inventory for ${totalItemsToUpdate} items.`, itemsUpdated: totalItemsToUpdate };
+    if (totalItemsProcessed === 0) {
+         return { success: true, message: 'No data to update from Excel.', itemsUpdated: 0 };
+    }
+    return { success: true, message: `Successfully processed ${successfulInserts} items from Excel into inventory and transactions.`, itemsUpdated: successfulInserts };
 }
   
 async function handleUpdateInventoryClick() {
