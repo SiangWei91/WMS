@@ -31,32 +31,12 @@ export async function loadDashboard(mainContentArea) {
     const contentArea = ensureMainContentArea(mainContentArea);
     contentArea.innerHTML = `
       <div class="dashboard">
-          <h1>Welcome to Li Chuan Inventory Management System</h1>
-          <div class="stats">
-              <div class="stat-card"><i class="fas fa-boxes"></i><div><h3>Total Product</h3><p id="total-products">0</p></div></div>
-              <div class="stat-card"><i class="fas fa-warehouse"></i><div><h3>Total Quantity</h3><p id="total-inventory">0</p></div></div>
-              <div class="stat-card"><i class="fas fa-exchange-alt"></i><div><h3>Transaction</h3><p id="today-transactions">0</p></div></div>
-          </div>
+          <h1>Dashboard</h1>
+          <p>Coming Soon!</p>
       </div>
     `;
-    try {
-        if (window.dashboardAPI && typeof window.dashboardAPI.getStats === 'function') {
-            const stats = await window.dashboardAPI.getStats();
-            if(document.getElementById('total-products')) document.getElementById('total-products').textContent = stats.totalProducts;
-            if(document.getElementById('total-inventory')) document.getElementById('total-inventory').textContent = stats.totalInventory;
-            if(document.getElementById('today-transactions')) document.getElementById('today-transactions').textContent = stats.todayTransactions;
-        } else {
-            console.warn('dashboardAPI.getStats is not available.');
-            ['total-products', 'total-inventory', 'today-transactions'].forEach(id => {
-                if(document.getElementById(id)) document.getElementById(id).textContent = 'N/A';
-            });
-        }
-    } catch (error) {
-        console.error('加载仪表盘数据失败:', error);
-        ['total-products', 'total-inventory', 'today-transactions'].forEach(id => {
-            if(document.getElementById(id)) document.getElementById(id).textContent = 'Error';
-        });
-    }
+    // The previous logic for displaying stat cards and setting their values
+    // (either from API or to "Coming Soon") is now removed.
 }
 
 function loadInboundForm(mainContentArea) {
