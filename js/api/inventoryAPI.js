@@ -28,10 +28,10 @@ const inventoryAPI_module = {
 
                 // Supabase returns data directly, no need to map docs like Firestore
                 // Dates from Supabase are already ISO strings if TIMESTAMPTZ
-                // Ensure productCode is present, Supabase primary key is likely 'product_code'
+                // Ensure product_code is present, Supabase primary key is likely 'product_code' // CHANGED
                 const itemsToCache = supabaseInventoryItems.map(item => ({
                     ...item,
-                    productCode: item.product_code // Ensure field name consistency if needed by IndexedDB
+                    product_code: item.product_code // Ensure field name consistency for IndexedDB (keyPath is product_code) // CHANGED
                 }));
 
 
@@ -51,12 +51,12 @@ const inventoryAPI_module = {
             let productMap = new Map();
             if (window.productAPI && typeof window.productAPI.getProducts === 'function') {
                 try {
-                    const productResponse = await window.productAPI.getProducts({ limit: 10000, page: 1 });
+                    const productResponse = await window.productAPI.getProducts({ limit: 10000, page: 1 }); // productAPI now returns objects with product_code
                     if (productResponse.data && productResponse.data.length > 0) {
                         productResponse.data.forEach(product => {
-                            // Assuming product.productCode is the correct field from productAPI
-                            if (product.productCode) {
-                                productMap.set(product.productCode, {
+                            // Assuming product.product_code is the correct field from productAPI (which it is after refactor) // CHANGED
+                            if (product.product_code) { // CHANGED
+                                productMap.set(product.product_code, { // CHANGED
                                     name: product.name || 'Unknown Product',
                                     packaging: product.packaging || ''
                                 });
@@ -71,8 +71,9 @@ const inventoryAPI_module = {
             }
 
             const enrichedInventory = aggregatedInventory.map(item => {
-                // Ensure item.productCode is used for lookup, which should be consistent now
-                const productDetails = productMap.get(item.productCode) || { name: 'Unknown Product', packaging: '' };
+                // Ensure item.product_code is used for lookup, which should be consistent now // CHANGED
+                // aggregatedInventory items now have 'product_code' from the initial mapping or IDB
+                const productDetails = productMap.get(item.product_code) || { name: 'Unknown Product', packaging: '' }; // CHANGED
                 return {
                     ...item,
                     productName: productDetails.name,
@@ -129,26 +130,27 @@ const inventoryAPI_module = {
                     let itemIdsToDelete = [];
 
                     const { eventType, new: newRecord, old: oldRecord, table } = payload;
-                    // Ensure productCode field name consistency
+                    // Ensure product_code field name consistency // CHANGED
                     const recordToProcess = eventType === 'DELETE' ? oldRecord : newRecord;
                     if (!recordToProcess) {
                         console.warn("Inventory listener: No record data in payload for table", table, payload);
                         return;
                     }
                      // Map Supabase columns to what IndexedDB expects, esp. primary key for inventory_aggregated
-                    const invItemData = { ...recordToProcess, productCode: recordToProcess.product_code };
+                    const invItemData = { ...recordToProcess, product_code: recordToProcess.product_code }; // CHANGED (key is now product_code)
 
 
                     if (eventType === 'INSERT' || eventType === 'UPDATE') {
-                        const existingItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, invItemData.productCode);
+                        // invItemData.product_code is the key for IDB 'inventory' store (keyPath: 'product_code')
+                        const existingItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, invItemData.product_code); // CHANGED
                         // last_updated is a TIMESTAMPTZ, should be comparable as ISO strings
                         if (!existingItem || !areObjectsShallowEqual(existingItem, invItemData, ['last_updated'])) {
                             itemsToUpdate.push(invItemData);
                         }
                     } else if (eventType === 'DELETE') {
                         // For DELETE, oldRecord contains the data of the row that was deleted.
-                        // The primary key is oldRecord.product_code
-                        itemIdsToDelete.push(invItemData.productCode);
+                        // The primary key is oldRecord.product_code, which is mapped to invItemData.product_code
+                        itemIdsToDelete.push(invItemData.product_code); // CHANGED
                     }
 
                     if (itemsToUpdate.length > 0) {
@@ -197,32 +199,32 @@ const inventoryAPI_module = {
         }
     },
 
-    async getBatchDetailsForProduct(productCode, warehouseId) {
+    async getBatchDetailsForProduct(product_code, warehouseId) { // CHANGED parameter name
         if (!window.supabaseClient) {
             console.error("Supabase client is not available.");
             throw new Error("Supabase client is not initialized.");
         }
-        if (!productCode || !warehouseId) {
-            console.error("getBatchDetailsForProduct: productCode and warehouseId are required.");
+        if (!product_code || !warehouseId) { // CHANGED
+            console.error("getBatchDetailsForProduct: product_code and warehouseId are required."); // CHANGED
             throw new Error("Product code and warehouse ID are required.");
         }
 
         try {
-            console.log(`[inventoryAPI.getBatchDetailsForProduct] Fetching batch details from Supabase for productCode: ${productCode}, warehouseId: ${warehouseId}`);
+            console.log(`[inventoryAPI.getBatchDetailsForProduct] Fetching batch details from Supabase for product_code: ${product_code}, warehouseId: ${warehouseId}`); // CHANGED
             const { data: batchDetails, error } = await window.supabaseClient
                 .from('inventory') // Target 'inventory' table
                 .select('*')
-                .eq('product_code', productCode) // Use 'product_code' column
+                .eq('product_code', product_code) // Use 'product_code' column, variable is now also product_code
                 .eq('warehouse_id', warehouseId) // Use 'warehouse_id' column
                 .gt('quantity', 0); // quantity > 0
 
             if (error) {
-                console.error(`[inventoryAPI.getBatchDetailsForProduct] Error fetching batch details from Supabase for productCode ${productCode}, warehouseId ${warehouseId}:`, error);
+                console.error(`[inventoryAPI.getBatchDetailsForProduct] Error fetching batch details from Supabase for product_code ${product_code}, warehouseId ${warehouseId}:`, error); // CHANGED
                 throw error;
             }
 
             if (!batchDetails || batchDetails.length === 0) {
-                console.log(`[inventoryAPI.getBatchDetailsForProduct] No matching batch details found in Supabase for productCode: ${productCode}, warehouseId: ${warehouseId}`);
+                console.log(`[inventoryAPI.getBatchDetailsForProduct] No matching batch details found in Supabase for product_code: ${product_code}, warehouseId: ${warehouseId}`); // CHANGED
                 return [];
             }
 
@@ -239,7 +241,7 @@ const inventoryAPI_module = {
             }));
         } catch (error) {
             // Catch errors from the try block or re-thrown by Supabase client
-            console.error(`[inventoryAPI.getBatchDetailsForProduct] Error fetching batch details for productCode ${productCode}, warehouseId ${warehouseId}:`, error);
+            console.error(`[inventoryAPI.getBatchDetailsForProduct] Error fetching batch details for product_code ${product_code}, warehouseId ${warehouseId}:`, error); // CHANGED
             throw error; // Re-throw the error to be caught by the caller
         }
     }
