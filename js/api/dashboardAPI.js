@@ -3,6 +3,11 @@ import { incrementReadCount } from '../firebaseReadCounter.js';
 
 const dashboardAPI_module = { // Renamed for clarity
     async getStats() {
+        // console.log("dashboardAPI.getStats called, but functionality is disabled for 'Coming Soon'.");
+        // Return default/placeholder values as the dashboard will show "Coming Soon"
+        return { totalProducts: 'N/A', totalInventory: 'N/A', todayTransactions: 'N/A', message: "Dashboard functionality coming soon." };
+
+        /*
         if (!window.db) {
             console.error("Firestore 'db' instance is not available for dashboard stats.");
             // Return default/error state that UI can handle
@@ -50,6 +55,7 @@ const dashboardAPI_module = { // Renamed for clarity
             todayTransactions = 'Error'; // Indicate error
         }
         return { totalProducts, totalInventory, todayTransactions };
+        */
     }
 };
 
