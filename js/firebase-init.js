@@ -18,6 +18,7 @@ const db = firebase.firestore(); // Using global firebase.firestore from CDN, co
 
 // Make db available, e.g., by attaching to window if not using modules,
 // or prepare for export if you switch to modules later.
-window.db = db; // Simple global for now
+// window.db = db; // Commented out as product operations are moving to Supabase.
+                  // If other Firestore collections are used, this might need to be handled differently.
 
-console.log('Firebase initialized and Firestore instance created.');
+console.log('Firebase initialized. Firestore instance created but window.db is not globally assigned by default anymore for product migration.');
