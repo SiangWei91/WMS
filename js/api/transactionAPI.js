@@ -1,37 +1,56 @@
 // Depends on: helpers.js (ensureDbManager, areObjectsShallowEqual)
-// Depends on: listeners.js (transactionListenerUnsubscribe)
-import { incrementReadCount } from '../firebaseReadCounter.js';
+// Supabase: Uses window.supabaseClient
+// import { incrementReadCount } from '../firebaseReadCounter.js'; // Firebase specific
 
-const transactionAPI_module = { // Renamed for clarity
+let transactionListenerUnsubscribe = null; // Will hold the Supabase subscription object
+
+const transactionAPI_module = {
     async getTransactions(params = {}) {
-        console.log('[transactionAPI.getTransactions] Called with params:', JSON.parse(JSON.stringify(params))); // Log params
+        console.log('[transactionAPI.getTransactions] Called with params:', JSON.parse(JSON.stringify(params)));
         await ensureDbManager();
         const { productCode, type, startDate, endDate, limit = 10, currentPage = 1 } = params;
 
         try {
-            const db = await window.indexedDBManager.initDB();
+            const idb = await window.indexedDBManager.initDB(); // Renamed 'db' to 'idb' to avoid confusion with supabase client
             const transactionStoreName = window.indexedDBManager.STORE_NAMES.TRANSACTIONS;
 
-            if (!db.objectStoreNames.contains(transactionStoreName)) {
-                console.log("Transactions store not found, fetching from Firestore...");
-                if (!window.db) throw new Error("Firestore 'db' instance is not available.");
-                const firestoreSnapshot = await window.db.collection('transactions').orderBy('transactionDate', 'desc').get();
-                incrementReadCount(firestoreSnapshot.docs.length || 1); // Count reads
-                const firestoreTransactions = firestoreSnapshot.docs.map(doc => {
-                    const txData = doc.data();
-                    if (txData.transactionDate && txData.transactionDate.toDate) {
-                        txData.transactionDate = txData.transactionDate.toDate().toISOString();
-                    }
-                    return { id: doc.id, ...txData };
-                });
-                if (firestoreTransactions.length > 0) {
-                     await window.indexedDBManager.bulkPutItems(transactionStoreName, firestoreTransactions);
+            // Check if IndexedDB has been populated. If not, fetch from Supabase.
+            // This logic might need adjustment based on how often full sync is desired.
+            // For now, assume if empty, fetch all and cache.
+            const countInIDB = await window.indexedDBManager.countItems(transactionStoreName);
+            if (countInIDB === 0) {
+                console.log("Transactions store in IndexedDB is empty, fetching from Supabase...");
+                if (!window.supabaseClient) throw new Error("Supabase client is not available.");
+
+                const { data: supabaseTransactions, error: fetchError } = await window.supabaseClient
+                    .from('transactions')
+                    .select('*')
+                    .order('transaction_date', { ascending: false }); // Match Firestore's orderBy
+
+                if (fetchError) {
+                    console.error("Error fetching transactions from Supabase:", fetchError);
+                    throw fetchError;
+                }
+
+                const itemsToCache = supabaseTransactions.map(tx => ({
+                    ...tx,
+                    // Ensure field name consistency if IndexedDB expects specific names, e.g., productCode, transactionDate
+                    productCode: tx.product_code,
+                    transactionDate: tx.transaction_date
+                }));
+
+                if (itemsToCache.length > 0) {
+                    await window.indexedDBManager.bulkPutItems(transactionStoreName, itemsToCache);
+                    console.log(`Cached ${itemsToCache.length} transactions from Supabase to IndexedDB.`);
                 }
             }
 
-            const tx = db.transaction(transactionStoreName, 'readonly');
+            const tx = idb.transaction(transactionStoreName, 'readonly');
             const store = tx.objectStore(transactionStoreName);
-            const index = store.index('transactionDate'); 
+            // Assuming 'transactionDate' is the correct index name in IndexedDB.
+            // Schema uses 'transaction_date', ensure it's mapped correctly when caching.
+            const index = store.index('transactionDate');
+
 
             let range = null;
             if (startDate && endDate) {
@@ -41,48 +60,40 @@ const transactionAPI_module = { // Renamed for clarity
             } else if (endDate) {
                 range = IDBKeyRange.upperBound(new Date(endDate).toISOString());
             }
-            console.log('[transactionAPI.getTransactions] Using range for IndexedDB query:', range); // Log range
+            console.log('[transactionAPI.getTransactions] Using range for IndexedDB query:', range);
 
             const results = [];
             let totalItems = 0;
             const offset = (currentPage - 1) * limit;
             let cursorAdvancement = offset;
             let hasMoreDataForNextPage = false;
-            let rawCountAll = 0; // Log raw count
 
             await new Promise((resolveCount, rejectCount) => {
                 const countCursorRequest = index.openCursor(range, 'prev');
                 countCursorRequest.onsuccess = event => {
                     const cursor = event.target.result;
                     if (cursor) {
-                        rawCountAll++; // Count all items iterated by cursor
                         const item = cursor.value;
-                        // console.log('[transactionAPI.getTransactions countCursor] Iterating item:', JSON.parse(JSON.stringify(item))); // Potentially very verbose
                         let match = true;
                         if (productCode && item.productCode !== productCode) match = false;
                         if (type && item.type !== type) match = false;
-                        
                         if (match) {
                             totalItems++;
                         }
                         cursor.continue();
                     } else {
-                        console.log(`[transactionAPI.getTransactions countCursor] Raw items iterated by count cursor: ${rawCountAll}, Matched items for total: ${totalItems}`);
                         resolveCount();
                     }
                 };
                 countCursorRequest.onerror = event => rejectCount(event.target.error);
             });
-            
-            let rawItemsIteratedMain = 0; // Log raw items for main cursor
+
             await new Promise((resolveCursor, rejectCursor) => {
-                const cursorRequest = index.openCursor(range, 'prev'); 
+                const cursorRequest = index.openCursor(range, 'prev');
                 cursorRequest.onsuccess = event => {
                     const cursor = event.target.result;
                     if (cursor) {
-                        rawItemsIteratedMain++;
                         const item = cursor.value;
-                        // console.log('[transactionAPI.getTransactions mainCursor] Iterating item:', JSON.parse(JSON.stringify(item))); // Potentially very verbose
                         let match = true;
                         if (productCode && item.productCode !== productCode) match = false;
                         if (type && item.type !== type) match = false;
@@ -93,21 +104,20 @@ const transactionAPI_module = { // Renamed for clarity
                             } else if (results.length < limit) {
                                 results.push(item);
                             } else {
-                                hasMoreDataForNextPage = true; 
-                                resolveCursor(); 
-                                return; 
+                                hasMoreDataForNextPage = true;
+                                resolveCursor();
+                                return;
                             }
                         }
                         cursor.continue();
                     } else {
-                        console.log(`[transactionAPI.getTransactions mainCursor] Raw items iterated by main cursor: ${rawItemsIteratedMain}`);
-                        resolveCursor(); 
+                        resolveCursor();
                     }
                 };
                 cursorRequest.onerror = event => rejectCursor(event.target.error);
             });
-            
-            console.log('[transactionAPI.getTransactions] Returning results:', JSON.parse(JSON.stringify(results)), 'Total items matching filters:', totalItems); // Log final results
+
+            console.log('[transactionAPI.getTransactions] Returning results:', JSON.parse(JSON.stringify(results)), 'Total items matching filters:', totalItems);
             return {
                 data: results,
                 pagination: {
@@ -116,93 +126,126 @@ const transactionAPI_module = { // Renamed for clarity
                     totalItems: totalItems,
                     totalPages: Math.ceil(totalItems / limit),
                     hasNextPage: hasMoreDataForNextPage,
-                    lastVisibleDocId: null 
+                    lastVisibleDocId: null // This was Firestore specific, may not apply to Supabase pagination directly
                 }
             };
 
         } catch (error) {
-            console.error("Error in transactionAPI.getTransactions (IndexedDB):", error);
+            console.error("Error in transactionAPI.getTransactions (IndexedDB/Supabase):", error);
             return { data: [], pagination: { currentPage: currentPage, itemsPerPage: limit, totalItems: 0, totalPages: 0, hasNextPage: false, lastVisibleDocId: null } };
         }
     },
+
     async inboundStock(data) {
         await ensureDbManager();
         const quantity = Number(data.quantity);
-        const transactionData = {
-            type: "inbound", 
-            productId: data.productId, 
-            productCode: data.productCode, 
-            productName: data.productName,
-            warehouseId: data.warehouseId, 
-            batchNo: data.batchNo || null, 
+        // Map to Supabase column names
+        const transactionPayload = {
+            type: "inbound",
+            product_id: data.productId, // Schema uses product_id
+            product_code: data.productCode,
+            product_name: data.productName,
+            warehouse_id: data.warehouseId,
+            batch_no: data.batchNo || null, // This is operationReferenceBatchNo in internal transfers
+            // product_batch_no: data.actualProductBatchNo, // if it's a separate field
             quantity: quantity,
-            operatorId: data.operatorId, 
-            description: data.description || `Stock in to ${data.warehouseId}.`
+            operator_id: data.operatorId,
+            description: data.description || `Stock in to ${data.warehouseId}.`,
+            // transaction_date will be set by Supabase (DEFAULT NOW()) or here for offline
         };
-        if (navigator.onLine && window.db) {
-            transactionData.transactionDate = firebase.firestore.FieldValue.serverTimestamp();
-            const batch = window.db.batch();
-            const transactionRef = window.db.collection('transactions').doc();
-            batch.set(transactionRef, transactionData);
-            await batch.commit();
-            console.log("Inbound transaction sent to Firestore:", transactionRef.id);
-            return { transactionId: transactionRef.id, status: "success" };
+
+        if (navigator.onLine && window.supabaseClient) {
+            // For online, transaction_date is handled by DB default or set to new Date().toISOString()
+            // Supabase doesn't have a direct equivalent of FieldValue.serverTimestamp() for client-side optimistic updates
+            // before insert. Best to let the DB handle it or use new Date().toISOString().
+            // If an ID is needed before insert, generate a UUID client-side.
+            const { data: insertedTx, error } = await window.supabaseClient
+                .from('transactions')
+                .insert({ ...transactionPayload, transaction_date: new Date().toISOString() })
+                .select()
+                .single(); // Assuming you want the inserted row back
+
+            if (error) {
+                console.error("Error sending inbound transaction to Supabase:", error);
+                throw error; // Or handle more gracefully
+            }
+            console.log("Inbound transaction sent to Supabase:", insertedTx.id);
+            return { transactionId: insertedTx.id, status: "success" };
         } else {
-            transactionData.transactionDate = new Date().toISOString();
-            transactionData.pendingSync = true;
-            transactionData.id = `local_${new Date().getTime()}_${Math.random().toString(36).substr(2, 9)}`;
+            // Offline handling
+            const localTxData = {
+                ...transactionPayload,
+                id: `local_${new Date().getTime()}_${Math.random().toString(36).substr(2, 9)}`,
+                transaction_date: new Date().toISOString(),
+                pending_sync: true
+            };
+            // Map back to JS field names for IndexedDB if necessary
+            const idbPayload = { ...localTxData, productCode: localTxData.product_code, transactionDate: localTxData.transaction_date };
+
+
             let aggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, data.productCode);
             if (!aggItem) {
-                aggItem = {
-                    productCode: data.productCode,
-                    totalQuantity: 0,
-                    quantitiesByWarehouseId: {},
-                    lastUpdated: new Date().toISOString()
-                };
+                aggItem = { productCode: data.productCode, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() };
             }
             aggItem.totalQuantity = (aggItem.totalQuantity || 0) + quantity;
             aggItem.quantitiesByWarehouseId[data.warehouseId] = (aggItem.quantitiesByWarehouseId[data.warehouseId] || 0) + quantity;
             aggItem.lastUpdated = new Date().toISOString();
-            aggItem.pendingSync = true; 
+            aggItem.pendingSync = true;
             await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.INVENTORY, aggItem);
+
             await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE, {
-                storeName: 'transactions', 
-                operation: 'inbound',    
-                payload: transactionData,
+                storeName: 'transactions', // Supabase table name
+                operation: 'inbound', // Or 'insert'
+                payload: idbPayload, // Data to be synced
                 timestamp: new Date().toISOString()
             });
-            console.log("Inbound transaction queued offline. Optimistic update to IDB inventory cache done.", transactionData.id);
-            return { transactionId: transactionData.id, status: "queued_offline" };
+            console.log("Inbound transaction queued offline. Optimistic update to IDB inventory cache done.", idbPayload.id);
+            return { transactionId: idbPayload.id, status: "queued_offline" };
         }
     },
 
     async outboundStock(data) {
         await ensureDbManager();
         const quantity = Number(data.quantity);
-        const transactionData = {
-            type: "outbound", 
-            productId: data.productId, 
-            productCode: data.productCode, 
-            productName: data.productName,
-            warehouseId: data.warehouseId, 
-            batchNo: data.batchNo || null, 
+        const transactionPayload = {
+            type: "outbound",
+            product_id: data.productId,
+            product_code: data.productCode,
+            product_name: data.productName,
+            warehouse_id: data.warehouseId,
+            batch_no: data.batchNo || null,
             quantity: quantity,
-            operatorId: data.operatorId,
+            operator_id: data.operatorId,
             description: data.description || `Stock out from ${data.warehouseId}.`
         };
-        if (navigator.onLine && window.db) {
-            transactionData.transactionDate = firebase.firestore.FieldValue.serverTimestamp();
-            const transactionRef = window.db.collection('transactions').doc();
-            await transactionRef.set(transactionData); 
-            console.log("Outbound transaction sent to Firestore:", transactionRef.id);
-            return { transactionId: transactionRef.id, status: "success" };
+
+        if (navigator.onLine && window.supabaseClient) {
+            const { data: insertedTx, error } = await window.supabaseClient
+                .from('transactions')
+                .insert({ ...transactionPayload, transaction_date: new Date().toISOString() })
+                .select()
+                .single();
+
+            if (error) {
+                console.error("Error sending outbound transaction to Supabase:", error);
+                throw error;
+            }
+            console.log("Outbound transaction sent to Supabase:", insertedTx.id);
+            return { transactionId: insertedTx.id, status: "success" };
         } else {
-            transactionData.transactionDate = new Date().toISOString();
-            transactionData.pendingSync = true;
-            transactionData.id = `local_${new Date().getTime()}_${Math.random().toString(36).substr(2, 9)}`;
+            // Offline handling
+            const localTxData = {
+                ...transactionPayload,
+                id: `local_${new Date().getTime()}_${Math.random().toString(36).substr(2, 9)}`,
+                transaction_date: new Date().toISOString(),
+                pending_sync: true
+            };
+            const idbPayload = { ...localTxData, productCode: localTxData.product_code, transactionDate: localTxData.transaction_date };
+
+
             let aggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, data.productCode);
             if (!aggItem) {
-                console.warn(`Outbound offline: Aggregated item for ${data.productCode} not found in IDB. Stock might go negative or be inaccurate.`);
+                console.warn(`Outbound offline: Aggregated item for ${data.productCode} not found in IDB.`);
                 aggItem = { productCode: data.productCode, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() };
             }
             const currentWarehouseQty = aggItem.quantitiesByWarehouseId[data.warehouseId] || 0;
@@ -214,18 +257,25 @@ const transactionAPI_module = { // Renamed for clarity
             aggItem.lastUpdated = new Date().toISOString();
             aggItem.pendingSync = true;
             await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.INVENTORY, aggItem);
+
             await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE, {
                 storeName: 'transactions',
-                operation: 'outbound',
-                payload: transactionData,
+                operation: 'outbound', // Or 'insert'
+                payload: idbPayload,
                 timestamp: new Date().toISOString()
             });
-            console.log("Outbound transaction queued offline. Optimistic update to IDB inventory cache done.", transactionData.id);
-            return { transactionId: transactionData.id, status: "queued_offline" };
+            console.log("Outbound transaction queued offline. Optimistic update to IDB inventory cache done.", idbPayload.id);
+            return { transactionId: idbPayload.id, status: "queued_offline" };
         }
     },
 
-    async outboundStockByInventoryId(data) { 
+    async outboundStockByInventoryId(data) {
+        // This function used Firestore transactions. Supabase supports transactions via functions or RPC.
+        // For client-side, direct table manipulation in a transaction is not as straightforward as Firestore.
+        // Option 1: Create a Supabase Edge Function (RPC) to handle this atomically.
+        // Option 2: Perform operations sequentially and accept potential (though less likely for this specific op) inconsistencies if one fails.
+        // For now, implementing with sequential operations and highlighting the need for an RPC for atomicity.
+
         if (typeof window.clearAllPageMessages === 'function') {
             window.clearAllPageMessages();
         }
@@ -237,362 +287,358 @@ const transactionAPI_module = { // Renamed for clarity
             }
             throw new Error("Operation not supported offline.");
         }
-        if (!window.db) throw new Error("Firestore 'db' instance is not available.");
-        const inventoryDocRef = window.db.collection('inventory').doc(data.inventoryId);
-        const db = firebase.firestore(); 
-        return db.runTransaction(async (transaction) => {
-            const inventoryDoc = await transaction.get(inventoryDocRef);
-            incrementReadCount(1); // Count the read within the transaction
-            if (!inventoryDoc.exists) throw new Error(`Inventory item with ID ${data.inventoryId} not found.`);
-            const currentItemData = inventoryDoc.data();
-            const currentQuantity = currentItemData.quantity;
+        if (!window.supabaseClient) throw new Error("Supabase client is not available.");
+
+        console.warn("outboundStockByInventoryId: For true atomicity, this should be a Supabase Edge Function/RPC call.");
+
+        try {
+            // 1. Fetch the inventory item
+            const { data: inventoryItem, error: fetchError } = await window.supabaseClient
+                .from('inventory')
+                .select('*')
+                .eq('id', data.inventoryId)
+                .single();
+
+            if (fetchError || !inventoryItem) {
+                throw new Error(`Inventory item with ID ${data.inventoryId} not found or fetch error.`);
+            }
+
+            const currentQuantity = inventoryItem.quantity;
             const quantityToDecrement = Number(data.quantityToDecrement);
             if (isNaN(quantityToDecrement) || quantityToDecrement < 0) throw new Error("Quantity to decrement must be a non-negative number.");
             if (currentQuantity < quantityToDecrement) throw new Error(`Insufficient stock for ${data.inventoryId}. Available: ${currentQuantity}, Requested: ${quantityToDecrement}.`);
-            let palletsToDecrementNum = 0, currentPallets = 0, newPalletCount = 0;
-            if (currentItemData.warehouseId === 'jordon') {
-                currentPallets = (currentItemData._3plDetails && currentItemData._3plDetails.pallet !== undefined) ? Number(currentItemData._3plDetails.pallet) : 0;
+
+            let palletsToDecrementNum = 0;
+            let newPalletCount = (inventoryItem._3pl_details && inventoryItem._3pl_details.pallet !== undefined) ? Number(inventoryItem._3pl_details.pallet) : 0;
+
+            if (inventoryItem.warehouse_id === 'jordon') { // Assuming warehouse_id for Supabase
+                const currentPallets = newPalletCount;
                 palletsToDecrementNum = (data.palletsToDecrement !== undefined && !isNaN(Number(data.palletsToDecrement))) ? Number(data.palletsToDecrement) : 0;
-                if (palletsToDecrementNum < 0) throw new Error(`Invalid pallet quantity to decrement. Must be non-negative.`);
+                if (palletsToDecrementNum < 0) throw new Error(`Invalid pallet quantity to decrement.`);
                 if (palletsToDecrementNum > currentPallets) throw new Error(`Insufficient pallet stock. Available: ${currentPallets}, Requested: ${palletsToDecrementNum}.`);
                 newPalletCount = currentPallets - palletsToDecrementNum;
             }
-            const transactionLogRef = db.collection('transactions').doc();
-            const logData = {
-                type: "outbound", inventoryId: data.inventoryId,
-                productId: data.productId || currentItemData.productId, 
-                productCode: currentItemData.productCode || data.productCode,
-                productName: currentItemData.productName || data.productName,
-                warehouseId: currentItemData.warehouseId, batchNo: currentItemData.batchNo || null,
-                quantity: quantityToDecrement, operatorId: data.operatorId,
-                transactionDate: firebase.firestore.FieldValue.serverTimestamp(),
-                description: data.description || `Stock out for transfer. Inventory ID: ${data.inventoryId}`
+
+            // 2. Create the transaction log
+            const logPayload = {
+                type: "outbound",
+                inventory_id: data.inventoryId, // Schema name
+                product_id: data.productId || inventoryItem.product_id,
+                product_code: inventoryItem.product_code || data.productCode,
+                product_name: inventoryItem.product_name || data.productName, // Assuming product_name is in inventory table
+                warehouse_id: inventoryItem.warehouse_id,
+                batch_no: inventoryItem.batch_no || null, // Assuming batch_no from inventory table
+                quantity: quantityToDecrement,
+                operator_id: data.operatorId,
+                transaction_date: new Date().toISOString(),
+                description: data.description || `Stock out for transfer. Inventory ID: ${data.inventoryId}`,
+                pallets_decremented: inventoryItem.warehouse_id === 'jordon' ? palletsToDecrementNum : null
             };
-            if (currentItemData.warehouseId === 'jordon') logData.palletsDecremented = palletsToDecrementNum;
-            transaction.set(transactionLogRef, logData);
+
+            const { data: newTransaction, error: txError } = await window.supabaseClient
+                .from('transactions')
+                .insert(logPayload)
+                .select()
+                .single();
+
+            if (txError) throw txError;
+
+            // 3. Update the inventory item
             const newQuantity = currentQuantity - quantityToDecrement;
-            const updatePayload = { quantity: newQuantity, lastUpdated: firebase.firestore.FieldValue.serverTimestamp() };
-            if (currentItemData.warehouseId === 'jordon') {
-                updatePayload['_3plDetails.pallet'] = newPalletCount;
-                if (newQuantity === 0 && newPalletCount !== 0) updatePayload['_3plDetails.pallet'] = 0;
+            const updatePayload = {
+                quantity: newQuantity,
+                last_updated: new Date().toISOString()
+            };
+            if (inventoryItem.warehouse_id === 'jordon') {
+                // Ensure _3pl_details is updated correctly. Fetch existing or initialize.
+                const current3plDetails = inventoryItem._3pl_details || {};
+                updatePayload._3pl_details = { ...current3plDetails, pallet: newPalletCount };
+                if (newQuantity === 0 && newPalletCount !== 0) updatePayload._3pl_details.pallet = 0;
             }
-            transaction.update(inventoryDocRef, updatePayload);
-            return { transactionId: transactionLogRef.id, status: "success", inventoryId: data.inventoryId };
-        });
+
+            const { error: updateError } = await window.supabaseClient
+                .from('inventory')
+                .update(updatePayload)
+                .eq('id', data.inventoryId);
+
+            if (updateError) {
+                // TODO: Consider how to handle rollback or compensation if this fails after transaction log succeeded.
+                // This is where an RPC is superior.
+                console.error("Failed to update inventory after logging transaction. Data might be inconsistent.", updateError);
+                throw updateError;
+            }
+
+            return { transactionId: newTransaction.id, status: "success", inventoryId: data.inventoryId };
+
+        } catch (error) {
+            console.error("Error in outboundStockByInventoryId (Supabase):", error);
+            throw error;
+        }
     },
 
     listenToTransactionChanges(callback) {
-        if (transactionListenerUnsubscribe) {
-            console.log("Detaching existing transaction listener.");
-            transactionListenerUnsubscribe();
+        if (transactionListenerUnsubscribe && typeof transactionListenerUnsubscribe.unsubscribe === 'function') {
+            console.log("Detaching existing Supabase transaction subscription.");
+            transactionListenerUnsubscribe.unsubscribe();
+            transactionListenerUnsubscribe = null;
         }
+
         ensureDbManager().then(() => {
-            if (!window.db) {
-                console.error("Firestore 'db' not available for transaction listener.");
-                if(typeof callback === 'function') callback({error: "Firestore not available."});
+            if (!window.supabaseClient) {
+                console.error("Supabase client not available for transaction listener.");
+                if (typeof callback === 'function') callback({ error: "Supabase client not available." });
                 return;
             }
-            transactionListenerUnsubscribe = window.db.collection('transactions')
-                .orderBy('transactionDate', 'desc') 
-                .onSnapshot(async (querySnapshot) => {
-                    incrementReadCount(querySnapshot.docs.length || 1); // Count reads for snapshot delivery
-                    await ensureDbManager(); 
-                    const changes = querySnapshot.docChanges();
+
+            transactionListenerUnsubscribe = window.supabaseClient
+                .channel('public:transactions')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, async (payload) => {
+                    console.log('Supabase transactions change received:', payload);
+                    await ensureDbManager();
                     let itemsToUpdate = [];
                     let itemIdsToDelete = [];
                     let changedCount = 0;
 
-                    if (changes.length > 0) {
-                        console.log(`Transaction listener: Processing ${changes.length} change(s) from Firestore.`);
+                    const { eventType, new: newRecord, old: oldRecord, table } = payload;
+                    const recordToProcess = eventType === 'DELETE' ? oldRecord : newRecord;
+
+                    if (!recordToProcess) {
+                        console.warn("Transaction listener: No record data in payload for table", table, payload);
+                        return;
                     }
-                    for (const change of changes) {
-                        const rawData = change.doc.data();
-                        const operatorId = rawData.operatorId;
-                        const docId = change.doc.id;
 
-                        if (operatorId === 'system_excel_import') {
-                            // Check if the transactionDate is null or not a Firestore Timestamp object
-                            if (rawData.transactionDate === null || typeof rawData.transactionDate?.toDate !== 'function') {
-                                console.log(`[Transaction Listener - Excel Import] Skipping doc ID ${docId} for now (operatorId: ${operatorId}). transactionDate is null or not a Firestore Timestamp. Value:`, rawData.transactionDate);
-                                // Skip this change, wait for the update with the resolved server timestamp
-                                continue; 
-                            }
-                            // console.log('[Transaction Listener - Excel Import] Raw data received (valid date expected):', JSON.parse(JSON.stringify(rawData)));
-                            // console.log('[Transaction Listener - Excel Import] Raw transactionDate from Firestore (valid date expected):', rawData.transactionDate);
-                        }
+                    // Map Supabase columns to what IndexedDB expects (e.g., id, productCode, transactionDate)
+                    // The 'id' from Supabase is the primary key.
+                    // 'transaction_date' from Supabase is already an ISO string.
+                    // 'product_code' from Supabase.
+                    const txData = {
+                        ...recordToProcess,
+                        id: recordToProcess.id, // ensure 'id' is used consistently
+                        productCode: recordToProcess.product_code,
+                        transactionDate: recordToProcess.transaction_date
+                    };
 
-                        let txData = { id: docId, ...rawData };
 
-                        if (txData.transactionDate && typeof txData.transactionDate.toDate === 'function') {
-                            // if (operatorId === 'system_excel_import') {
-                            //     console.log('[Transaction Listener - Excel Import] Attempting to convert transactionDate to ISOString. Original:', txData.transactionDate);
-                            // }
-                            try {
-                                txData.transactionDate = txData.transactionDate.toDate().toISOString();
-                                // if (operatorId === 'system_excel_import') {
-                                //     console.log('[Transaction Listener - Excel Import] Converted transactionDate to ISOString:', txData.transactionDate);
-                                // }
-                            } catch (e) {
-                                console.error('[Transaction Listener] Error converting transactionDate to ISOString:', e, 'Original value:', txData.transactionDate, 'Doc ID:', docId);
-                                // If conversion fails, it might remain a Firestore Timestamp object.
-                                // Depending on strictness, you might want to skip or set to null.
-                                // For now, let it proceed and see if areObjectsShallowEqual catches it or if IDB errors.
-                            }
-                        } else if (txData.transactionDate !== null && operatorId === 'system_excel_import') {
-                            // This case should ideally not be hit if the above skip logic works for null/unresolved timestamps.
-                            // However, if it's some other non-convertible format, log it.
-                            console.warn(`[Transaction Listener - Excel Import] Doc ID ${docId}: transactionDate is present but not a convertable Firestore Timestamp. Value:`, txData.transactionDate);
+                    // Excel import specific logic might need review if operatorId handling is still complex with Supabase
+                    // For now, assuming transaction_date from Supabase is always valid.
+
+                    if (eventType === 'INSERT' || eventType === 'UPDATE') {
+                        const existingItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, txData.id);
+                        if (!existingItem ||
+                            existingItem.transactionDate !== txData.transactionDate || // Direct comparison of ISO strings
+                            !areObjectsShallowEqual(existingItem, txData, ['transactionDate', 'updated_at'])) { // Supabase has updated_at
+                            itemsToUpdate.push(txData);
                         }
-                        
-                        if (change.type === "added" || change.type === "modified") {
-                            const existingItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, txData.id);
-                            // If it's a new item, or if the transactionDate has changed, 
-                            // or if other fields have changed (checked by areObjectsShallowEqual ignoring transactionDate)
-                            if (!existingItem || 
-                                existingItem.transactionDate !== txData.transactionDate || 
-                                !areObjectsShallowEqual(existingItem, txData, ['transactionDate'])
-                            ) {
-                                itemsToUpdate.push(txData);
-                            } else {
-                                // console.log(`[Transaction Listener] Doc ID ${txData.id} data is same as in IDB (considering transactionDate separately), skipping update.`);
-                            }
-                            changedCount++;
-                        }
-                        if (change.type === "removed") {
-                            itemIdsToDelete.push(txData.id);
-                            changedCount++;
-                        }
+                        changedCount++;
+                    } else if (eventType === 'DELETE') {
+                        itemIdsToDelete.push(txData.id); // Use the id of the deleted record
+                        changedCount++;
                     }
+
 
                     if (itemsToUpdate.length > 0) {
-                        console.log(`[transactionAPI listener] About to call bulkPutItems for ${itemsToUpdate.length} items.`); // New log
-                        try {
-                            await window.indexedDBManager.bulkPutItems(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, itemsToUpdate);
-                            console.log(`[transactionAPI listener] bulkPutItems completed for ${itemsToUpdate.length} items.`); // New Log
-                            
-                            // Verification step
-                            console.log(`[transactionAPI listener] After bulkPut completion, trying to verify IDB content for transactions.`);
-                            const allTxInIDB = await window.indexedDBManager.getAllItems(window.indexedDBManager.STORE_NAMES.TRANSACTIONS);
-                            console.log(`[transactionAPI listener] Verification: ${allTxInIDB.length} items found in IDB transactions store immediately after bulkPut. First item (if any):`, allTxInIDB[0] ? JSON.parse(JSON.stringify(allTxInIDB[0])) : 'N/A');
-                        } catch (err) {
-                            console.error('[transactionAPI listener] Error during bulkPutItems or subsequent verification:', err);
-                        }
-                         // Original log moved slightly to be outside the try if only bulkPutItems is in try, but it's fine here.
-                        console.log(`Transaction listener: Finished processing updates for ${itemsToUpdate.length} items in IndexedDB.`);
-                    }
-                    for (const idToDelete of itemIdsToDelete) {
-                        await window.indexedDBManager.deleteItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, idToDelete);
+                        await window.indexedDBManager.bulkPutItems(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, itemsToUpdate);
+                        console.log(`Transaction listener: Updated/added ${itemsToUpdate.length} items in IndexedDB from Supabase.`);
                     }
                     if (itemIdsToDelete.length > 0) {
-                        console.log(`Transaction listener: Deleted ${itemIdsToDelete.length} items from IndexedDB.`);
+                        // Assuming deleteItems can take an array of keys
+                        await window.indexedDBManager.deleteItems(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, itemIdsToDelete);
+                        console.log(`Transaction listener: Deleted ${itemIdsToDelete.length} items from IndexedDB based on Supabase delete.`);
                     }
 
-                    if (changedCount > 0 && typeof callback === 'function') { 
+                    if (changedCount > 0 && typeof callback === 'function') {
                         callback({ type: 'transactions_updated', count: changedCount });
                     }
-                }, (error) => {
-                    console.error("Error in transaction listener: ", error);
-                    if(typeof callback === 'function') callback({error: error.message});
+                })
+                .subscribe((status, err) => {
+                    if (status === 'SUBSCRIBED') {
+                        console.log('Successfully subscribed to Supabase transactions changes.');
+                    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || err) {
+                        console.error('Supabase transactions subscription error:', status, err);
+                        if (typeof callback === 'function') callback({ error: `Supabase subscription failed: ${status}` });
+                    }
                 });
-            console.log("Real-time listener attached for transactions.");
+            console.log("Real-time listener (Supabase subscription) attached for transactions.");
         }).catch(error => {
-            console.error("Failed to init DB for transaction listener:", error);
-            if(typeof callback === 'function') callback({error: "IndexedDB init failed for transaction listener."});
+            console.error("Failed to init DB for transaction listener (Supabase):", error);
+            if (typeof callback === 'function') callback({ error: "IndexedDB init failed for transaction listener." });
         });
+
         return () => {
-            if (transactionListenerUnsubscribe) {
-                transactionListenerUnsubscribe();
+            if (transactionListenerUnsubscribe && typeof transactionListenerUnsubscribe.unsubscribe === 'function') {
+                transactionListenerUnsubscribe.unsubscribe();
                 transactionListenerUnsubscribe = null;
-                console.log("Transaction listener detached by returned function.");
+                console.log("Transaction listener (Supabase subscription) detached by returned function.");
             }
         };
     },
 
     detachTransactionListener() {
-        if (transactionListenerUnsubscribe) {
-            transactionListenerUnsubscribe();
+        if (transactionListenerUnsubscribe && typeof transactionListenerUnsubscribe.unsubscribe === 'function') {
+            transactionListenerUnsubscribe.unsubscribe();
             transactionListenerUnsubscribe = null;
-            console.log("Real-time listener for transactions detached.");
+            console.log("Real-time listener for transactions (Supabase subscription) detached.");
         }
     },
 
     async performInternalTransfer(transferData) {
-        console.log("[performInternalTransfer] Initiated with data:", JSON.parse(JSON.stringify(transferData)));
+        console.log("[performInternalTransfer] Initiated with data (Supabase):", JSON.parse(JSON.stringify(transferData)));
         await ensureDbManager();
-        const { 
-            productId, productCode, productName, 
-            sourceWarehouseId, destinationWarehouseId, 
-            quantity, operatorId, batchNo, // Expect actual product batchNo here
-            sourceBatchDocId // Firestore document ID of the batch entry in 'inventory' collection
+        const {
+            productId, productCode, productName,
+            sourceWarehouseId, destinationWarehouseId,
+            quantity, operatorId, batchNo, // This is product's batchNo
+            sourceBatchDocId // This is the ID of the inventory item (row) in 'inventory' table
         } = transferData;
 
         if (!productCode || !sourceWarehouseId || !destinationWarehouseId || !quantity || isNaN(Number(quantity))) {
-            console.error("[performInternalTransfer] Invalid transferData received (basic validation):", JSON.parse(JSON.stringify(transferData)));
+            console.error("[performInternalTransfer] Invalid transferData (Supabase):", JSON.parse(JSON.stringify(transferData)));
             throw new Error("Invalid data for internal transfer. Missing required fields or invalid quantity.");
         }
-        // It's possible that batchNo might be null or undefined if not applicable for a product,
-        // so we don't strictly require it in the validation above unless business logic demands all transfers must have a batch.
-        // For now, we'll pass it along if present.
 
         const numericQuantity = Number(quantity);
-        // This 'batchNoForTransfer' is actually a reference ID for the transfer operation itself.
-        // Let's keep its generation but ensure the actual product batchNo is also handled.
         const operationReferenceBatchNo = `TRANSFER-${sourceWarehouseId}-TO-${destinationWarehouseId}`;
-        console.log(`[performInternalTransfer] Generated operationReferenceBatchNo: ${operationReferenceBatchNo}`);
 
-        const commonTxData = {
-            productId: productId || null, 
-            productCode,
-            productName,
+        // Map to Supabase column names
+        const commonTxPayload = {
+            product_id: productId || null,
+            product_code: productCode,
+            product_name: productName,
             quantity: numericQuantity,
-            operatorId,
-            productBatchNo: batchNo, // Storing the actual product's batch number
-            batchNo: operationReferenceBatchNo, // This is the transfer operation's reference ID
-            // Note: The original 'batchNo' field in transactions will now store the operationReferenceBatchNo.
-            // The actual product's batch is stored in 'productBatchNo'.
-            // This is a choice: alternatively, one could rename the transaction field e.g. transaction.operationRef 
-            // and keep transaction.batchNo for the product's batch.
-            // For now, adding a new field 'productBatchNo' is less disruptive to existing queries on 'batchNo'.
+            operator_id: operatorId,
+            product_batch_no: batchNo, // Actual product batch number
+            batch_no: operationReferenceBatchNo, // Transfer operation reference
         };
 
-        const outboundTx = {
-            ...commonTxData,
+        const outboundTxPayload = {
+            ...commonTxPayload,
             type: "outbound",
-            warehouseId: sourceWarehouseId,
-            description: `Internal transfer to warehouse ${destinationWarehouseId}` // More specific
+            warehouse_id: sourceWarehouseId,
+            description: `Internal transfer to warehouse ${destinationWarehouseId}`
         };
-        const inboundTx = {
-            ...commonTxData,
+        const inboundTxPayload = {
+            ...commonTxPayload,
             type: "inbound",
-            warehouseId: destinationWarehouseId,
-            description: `Internal transfer from warehouse ${sourceWarehouseId}` // More specific
+            warehouse_id: destinationWarehouseId,
+            description: `Internal transfer from warehouse ${sourceWarehouseId}`
         };
 
-        console.log("[performInternalTransfer] Outbound transaction data:", JSON.parse(JSON.stringify(outboundTx)));
-        console.log("[performInternalTransfer] Inbound transaction data:", JSON.parse(JSON.stringify(inboundTx)));
+        if (navigator.onLine && window.supabaseClient) {
+            console.log("[performInternalTransfer] ONLINE mode (Supabase).");
+            // This should ideally be an RPC call to a Supabase Edge Function for atomicity.
+            // Simulating sequential operations here.
+            console.warn("performInternalTransfer (Supabase): For true atomicity, this should be an RPC call.");
+            try {
+                // 1. Create outbound transaction
+                const { data: outTx, error: outError } = await window.supabaseClient
+                    .from('transactions')
+                    .insert({ ...outboundTxPayload, transaction_date: new Date().toISOString() })
+                    .select()
+                    .single();
+                if (outError) throw outError;
+                console.log(`[performInternalTransfer] Staged OUTBOUND tx (ID: ${outTx.id}) to Supabase.`);
 
-        try {
-            if (navigator.onLine && window.db && firebase.firestore) { // Added firebase.firestore check
-                console.log("[performInternalTransfer] ONLINE mode detected.");
-                const batch = window.db.batch();
-                
-                const outboundTxRef = window.db.collection('transactions').doc();
-                batch.set(outboundTxRef, { ...outboundTx, transactionDate: firebase.firestore.FieldValue.serverTimestamp() });
-                console.log(`[performInternalTransfer] Staging OUTBOUND tx (ID: ${outboundTxRef.id}) to batch.`);
+                // 2. Create inbound transaction
+                const { data: inTx, error: inError } = await window.supabaseClient
+                    .from('transactions')
+                    .insert({ ...inboundTxPayload, transaction_date: new Date().toISOString() })
+                    .select()
+                    .single();
+                if (inError) throw inError; // TODO: Handle rollback of outTx if this fails
+                console.log(`[performInternalTransfer] Staged INBOUND tx (ID: ${inTx.id}) to Supabase.`);
 
-                const inboundTxRef = window.db.collection('transactions').doc();
-                batch.set(inboundTxRef, { ...inboundTx, transactionDate: firebase.firestore.FieldValue.serverTimestamp() });
-                console.log(`[performInternalTransfer] Staging INBOUND tx (ID: ${inboundTxRef.id}) to batch.`);
-
-                // Update the specific batch document in the 'inventory' collection for the source warehouse
+                // 3. Update source inventory batch quantity (if sourceBatchDocId is provided)
                 if (sourceBatchDocId) {
-                    const sourceBatchRef = window.db.collection('inventory').doc(sourceBatchDocId);
-                    // It's safer to use FieldValue.increment with a negative value for atomic updates.
-                    // This also handles the case where the document might be updated by another process concurrently.
-                    batch.update(sourceBatchRef, {
-                        quantity: firebase.firestore.FieldValue.increment(-numericQuantity),
-                        lastUpdated: firebase.firestore.FieldValue.serverTimestamp() // Also update lastUpdated timestamp
-                    });
-                    console.log(`[performInternalTransfer] Staging update to source batch document (ID: ${sourceBatchDocId}) to decrement quantity by ${numericQuantity}.`);
+                    // Supabase requires explicit call to decrement. Using RPC with `increment` is safer.
+                    // Fetch current quantity first, then update. This is not atomic without RPC.
+                    const { data: sourceInvItem, error: fetchInvError } = await window.supabaseClient
+                        .from('inventory')
+                        .select('quantity')
+                        .eq('id', sourceBatchDocId)
+                        .single();
+
+                    if (fetchInvError) throw fetchInvError;
+                    if (!sourceInvItem) throw new Error(`Source inventory item ${sourceBatchDocId} not found.`);
+
+                    const newSourceQuantity = sourceInvItem.quantity - numericQuantity;
+                    if (newSourceQuantity < 0) throw new Error(`Insufficient stock in source inventory ${sourceBatchDocId}.`);
+
+                    const { error: updateInvError } = await window.supabaseClient
+                        .from('inventory')
+                        .update({ quantity: newSourceQuantity, last_updated: new Date().toISOString() })
+                        .eq('id', sourceBatchDocId);
+                    if (updateInvError) throw updateInvError; // TODO: Handle rollback
+                    console.log(`[performInternalTransfer] Updated source batch document (ID: ${sourceBatchDocId}) quantity in Supabase.`);
                 } else {
-                    // This case should ideally be prevented by UI requiring batch selection if batches exist.
-                    // If sourceBatchDocId is missing, it implies we can't update the specific batch.
-                    // This might be an error or an old transfer style. For now, log a warning.
-                    console.warn(`[performInternalTransfer] sourceBatchDocId is missing. Cannot update specific source batch quantity in 'inventory' collection.`);
-                }
-                
-                await batch.commit();
-                console.log(`[performInternalTransfer] ONLINE batch commit SUCCESS. Outbound Tx ID: ${outboundTxRef.id}, Inbound Tx ID: ${inboundTxRef.id}. Source batch doc update staged if ID provided.`);
-                return { status: "success", outboundTxId: outboundTxRef.id, inboundTxId: inboundTxRef.id };
-            } else {
-                console.log("[performInternalTransfer] OFFLINE mode detected.");
-                console.log(`[performInternalTransfer] OFFLINE: Updating IndexedDB INVENTORY for productCode: ${productCode}`);
-
-                let sourceAggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, productCode);
-                console.log(`[performInternalTransfer] OFFLINE: Fetched sourceAggItem (before outbound):`, JSON.parse(JSON.stringify(sourceAggItem)));
-                if (!sourceAggItem) {
-                    sourceAggItem = { productCode, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() };
-                    console.log(`[performInternalTransfer] OFFLINE: sourceAggItem not found, initialized.`, JSON.parse(JSON.stringify(sourceAggItem)));
-                }
-                
-                sourceAggItem.totalQuantity = (sourceAggItem.totalQuantity || 0) - numericQuantity;
-                sourceAggItem.quantitiesByWarehouseId[sourceWarehouseId] = (sourceAggItem.quantitiesByWarehouseId[sourceWarehouseId] || 0) - numericQuantity;
-                sourceAggItem.lastUpdated = new Date().toISOString();
-                sourceAggItem.pendingSync = true; 
-                await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.INVENTORY, sourceAggItem);
-                console.log(`[performInternalTransfer] OFFLINE: Updated sourceAggItem (after outbound):`, JSON.parse(JSON.stringify(sourceAggItem)));
-                
-                // Re-fetch or use the same item for destination updates. Re-fetching ensures we have the latest if multiple ops happened.
-                let destAggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, productCode);
-                console.log(`[performInternalTransfer] OFFLINE: Fetched destAggItem (before inbound):`, JSON.parse(JSON.stringify(destAggItem)));
-                if (!destAggItem || destAggItem.productCode !== productCode) { 
-                     destAggItem = { productCode, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() };
-                     console.log(`[performInternalTransfer] OFFLINE: destAggItem not found or mismatched, initialized.`, JSON.parse(JSON.stringify(destAggItem)));
-                }
-                
-                // Update destination quantity for the specific warehouse
-                destAggItem.quantitiesByWarehouseId[destinationWarehouseId] = (destAggItem.quantitiesByWarehouseId[destinationWarehouseId] || 0) + numericQuantity;
-                
-                // Recalculate total quantity based on all warehouse quantities in this item
-                let newTotal = 0;
-                for(const whId in destAggItem.quantitiesByWarehouseId){
-                    newTotal += (destAggItem.quantitiesByWarehouseId[whId] || 0);
-                }
-                destAggItem.totalQuantity = newTotal;
-                destAggItem.lastUpdated = new Date().toISOString();
-                destAggItem.pendingSync = true;
-                
-                await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.INVENTORY, destAggItem);
-                console.log(`[performInternalTransfer] OFFLINE: Updated destAggItem (after inbound and total recalc):`, JSON.parse(JSON.stringify(destAggItem)));
-
-                const localOutboundTx = {
-                    ...outboundTx,
-                    id: `local_tx_out_${new Date().getTime()}_${Math.random().toString(36).substr(2, 5)}`, // Unique ID
-                    transactionDate: new Date().toISOString(),
-                    pendingSync: true
-                };
-                console.log("[performInternalTransfer] OFFLINE: localOutboundTx prepared:", JSON.parse(JSON.stringify(localOutboundTx)));
-                await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE, {
-                    storeName: 'transactions', operation: 'outbound', payload: { ...localOutboundTx }, timestamp: new Date().toISOString() // Ensure payload is a copy
-                });
-                console.log("[performInternalTransfer] OFFLINE: Added localOutboundTx to OFFLINE_QUEUE.");
-                try {
-                    await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, localOutboundTx);
-                    console.log("[performInternalTransfer] OFFLINE: Added localOutboundTx to local TRANSACTIONS store.");
-                } catch (idbError) {
-                    console.error("[performInternalTransfer] OFFLINE: Error adding localOutboundTx to IDB TRANSACTIONS store:", idbError);
+                    console.warn(`[performInternalTransfer] sourceBatchDocId is missing. Cannot update specific source batch quantity.`);
                 }
 
-                const localInboundTx = {
-                    ...inboundTx,
-                    id: `local_tx_in_${new Date().getTime()}_${Math.random().toString(36).substr(2, 5)}`, // Unique ID
-                    transactionDate: new Date().toISOString(),
-                    pendingSync: true
-                };
-                console.log("[performInternalTransfer] OFFLINE: localInboundTx prepared:", JSON.parse(JSON.stringify(localInboundTx)));
-                await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE, {
-                    storeName: 'transactions', operation: 'inbound', payload: { ...localInboundTx }, timestamp: new Date().toISOString() // Ensure payload is a copy
-                });
-                console.log("[performInternalTransfer] OFFLINE: Added localInboundTx to OFFLINE_QUEUE.");
-                 try {
-                    await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, localInboundTx);
-                    console.log("[performInternalTransfer] OFFLINE: Added localInboundTx to local TRANSACTIONS store.");
-                } catch (idbError) {
-                    console.error("[performInternalTransfer] OFFLINE: Error adding localInboundTx to IDB TRANSACTIONS store:", idbError);
-                }
-                
-                console.log("[performInternalTransfer] OFFLINE: Processing complete.");
-                return { status: "queued_offline", outboundTxId: localOutboundTx.id, inboundTxId: localInboundTx.id };
+                console.log(`[performInternalTransfer] ONLINE Supabase operations SUCCESS. Outbound Tx ID: ${outTx.id}, Inbound Tx ID: ${inTx.id}.`);
+                return { status: "success", outboundTxId: outTx.id, inboundTxId: inTx.id };
+
+            } catch (error) {
+                console.error("[performInternalTransfer] CRITICAL ERROR during ONLINE Supabase transfer:", error);
+                // Implement manual rollback or notify user of partial failure if applicable
+                throw error;
             }
-        } catch (error) {
-            console.error("[performInternalTransfer] CRITICAL ERROR during transfer processing:", error);
-            console.error("[performInternalTransfer] Transfer Data that caused error:", JSON.parse(JSON.stringify(transferData)));
-            // Depending on where the error occurred, inventory might be partially updated (especially in offline)
-            // Re-throw the error so the caller (handleInternalTransferSubmit) can catch it and inform the user.
-            throw error; 
+        } else {
+            // Offline handling for internal transfer
+            console.log("[performInternalTransfer] OFFLINE mode (Supabase).");
+
+            // Optimistically update IndexedDB inventory_aggregated
+            let sourceAggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, productCode);
+            if (!sourceAggItem) sourceAggItem = { productCode, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() };
+            sourceAggItem.quantitiesByWarehouseId[sourceWarehouseId] = (sourceAggItem.quantitiesByWarehouseId[sourceWarehouseId] || 0) - numericQuantity;
+            // No change to totalQuantity here as it's an internal movement, just warehouse counts change.
+            // However, the destination warehouse also needs an update.
+             sourceAggItem.quantitiesByWarehouseId[destinationWarehouseId] = (sourceAggItem.quantitiesByWarehouseId[destinationWarehouseId] || 0) + numericQuantity;
+            sourceAggItem.lastUpdated = new Date().toISOString();
+            sourceAggItem.pendingSync = true;
+            await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.INVENTORY, sourceAggItem);
+            console.log(`[performInternalTransfer] OFFLINE: Updated IndexedDB INVENTORY for productCode: ${productCode} (both source and dest warehouses).`);
+
+
+            // Queue outbound transaction
+            const localOutboundTx = {
+                ...outboundTxPayload, // Uses Supabase field names
+                id: `local_tx_out_${new Date().getTime()}_${Math.random().toString(36).substr(2, 5)}`,
+                transaction_date: new Date().toISOString(),
+                pending_sync: true
+            };
+             // Map back to JS field names for IDB if needed
+            const idbOutboundPayload = { ...localOutboundTx, productCode: localOutboundTx.product_code, transactionDate: localOutboundTx.transaction_date, warehouseId: localOutboundTx.warehouse_id };
+
+            await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE, {
+                storeName: 'transactions', operation: 'internal_transfer_out', payload: idbOutboundPayload, timestamp: new Date().toISOString()
+            });
+            await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, idbOutboundPayload);
+
+
+            // Queue inbound transaction
+            const localInboundTx = {
+                ...inboundTxPayload, // Uses Supabase field names
+                id: `local_tx_in_${new Date().getTime()}_${Math.random().toString(36).substr(2, 5)}`,
+                transaction_date: new Date().toISOString(),
+                pending_sync: true
+            };
+            const idbInboundPayload = { ...localInboundTx, productCode: localInboundTx.product_code, transactionDate: localInboundTx.transaction_date, warehouseId: localInboundTx.warehouse_id };
+
+            await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE, {
+                storeName: 'transactions', operation: 'internal_transfer_in', payload: idbInboundPayload, timestamp: new Date().toISOString()
+            });
+            await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.TRANSACTIONS, idbInboundPayload);
+
+            // Note: Offline update for specific 'inventory' batch (sourceBatchDocId) is complex.
+            // The current offline logic primarily updates 'inventory_aggregated'.
+            // If 'inventory' table also needs offline optimistic updates, that would be an addition here.
+            console.warn("[performInternalTransfer] OFFLINE: Specific inventory batch update for sourceBatchDocId not implemented for offline mode yet.");
+
+
+            console.log("[performInternalTransfer] OFFLINE: Processing complete.");
+            return { status: "queued_offline", outboundTxId: localOutboundTx.id, inboundTxId: localInboundTx.id };
         }
     }
 };
 
 window.transactionAPI = transactionAPI_module;
-console.log("transactionAPI.js executed and window.transactionAPI assigned:", window.transactionAPI && typeof window.transactionAPI.listenToTransactionChanges === 'function');
+console.log("transactionAPI.js executed and window.transactionAPI assigned (Supabase version):", window.transactionAPI && typeof window.transactionAPI.listenToTransactionChanges === 'function');
