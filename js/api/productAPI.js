@@ -424,7 +424,7 @@ const productAPI_supabase = {
             const { data: supabaseProductRow, error } = await window.supabaseClient
                 .from('products')
                 .select('*')
-                .eq('product_code', trimmedCode) // Use Supabase column name
+                .eq('productCode', trimmedCode) // CORRECTED: Use Supabase column name 'productCode' (camelCase)
                 .maybeSingle(); 
 
             if (error) throw error;
