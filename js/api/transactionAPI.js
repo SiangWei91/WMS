@@ -8,7 +8,7 @@ const transactionAPI_module = {
     async getTransactions(params = {}) {
         console.log('[transactionAPI.getTransactions] Called with params:', JSON.parse(JSON.stringify(params)));
         await ensureDbManager();
-        const { productCode, type, startDate, endDate, limit = 10, currentPage = 1 } = params;
+        const { product_code, type, startDate, endDate, limit = 10, currentPage = 1 } = params; // CHANGED productCode to product_code
 
         try {
             const idb = await window.indexedDBManager.initDB(); // Renamed 'db' to 'idb' to avoid confusion with supabase client
@@ -34,8 +34,8 @@ const transactionAPI_module = {
 
                 const itemsToCache = supabaseTransactions.map(tx => ({
                     ...tx,
-                    // Ensure field name consistency if IndexedDB expects specific names, e.g., productCode, transactionDate
-                    productCode: tx.product_code,
+                    // Ensure field name consistency if IndexedDB expects specific names, e.g., product_code, transactionDate // CHANGED
+                    product_code: tx.product_code, // CHANGED key
                     transactionDate: tx.transaction_date
                 }));
 
@@ -73,10 +73,11 @@ const transactionAPI_module = {
                 countCursorRequest.onsuccess = event => {
                     const cursor = event.target.result;
                     if (cursor) {
-                        const item = cursor.value;
+                        const item = cursor.value; // item from IDB, will have product_code
                         let match = true;
-                        if (productCode && item.productCode !== productCode) match = false;
+                        if (product_code && item.product_code !== product_code) match = false; // CHANGED
                         if (type && item.type !== type) match = false;
+                        // Note: productId filter is handled by Supabase query if provided, or not applied if only IDB
                         if (match) {
                             totalItems++;
                         }
@@ -93,11 +94,11 @@ const transactionAPI_module = {
                 cursorRequest.onsuccess = event => {
                     const cursor = event.target.result;
                     if (cursor) {
-                        const item = cursor.value;
+                        const item = cursor.value; // item from IDB, will have product_code
                         let match = true;
-                        if (productCode && item.productCode !== productCode) match = false;
+                        if (product_code && item.product_code !== product_code) match = false; // CHANGED
                         if (type && item.type !== type) match = false;
-
+                        // Note: productId filter logic
                         if (match) {
                             if (cursorAdvancement > 0) {
                                 cursorAdvancement--;
@@ -142,8 +143,8 @@ const transactionAPI_module = {
         // Map to Supabase column names
         const transactionPayload = {
             type: "inbound",
-            product_id: data.productId, // Schema uses product_id
-            product_code: data.productCode,
+            product_id: data.productId, // Schema uses product_id - assuming this is a distinct identifier
+            product_code: data.product_code, // CHANGED - data now provides product_code
             product_name: data.productName,
             warehouse_id: data.warehouseId,
             batch_no: data.batchNo || null, // This is operationReferenceBatchNo in internal transfers
@@ -180,12 +181,14 @@ const transactionAPI_module = {
                 pending_sync: true
             };
             // Map back to JS field names for IndexedDB if necessary
-            const idbPayload = { ...localTxData, productCode: localTxData.product_code, transactionDate: localTxData.transaction_date };
+            // localTxData already has product_code (from Supabase mapping)
+            const idbPayload = { ...localTxData, product_code: localTxData.product_code, transactionDate: localTxData.transaction_date }; // CHANGED key
 
 
-            let aggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, data.productCode);
+            let aggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, data.product_code); // CHANGED data.product_code
             if (!aggItem) {
-                aggItem = { productCode: data.productCode, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() };
+                // INVENTORY store keyPath is 'product_code'
+                aggItem = { product_code: data.product_code, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() }; // CHANGED
             }
             aggItem.totalQuantity = (aggItem.totalQuantity || 0) + quantity;
             aggItem.quantitiesByWarehouseId[data.warehouseId] = (aggItem.quantitiesByWarehouseId[data.warehouseId] || 0) + quantity;
@@ -209,8 +212,8 @@ const transactionAPI_module = {
         const quantity = Number(data.quantity);
         const transactionPayload = {
             type: "outbound",
-            product_id: data.productId,
-            product_code: data.productCode,
+            product_id: data.productId, // Assuming distinct identifier
+            product_code: data.product_code, // CHANGED - data now provides product_code
             product_name: data.productName,
             warehouse_id: data.warehouseId,
             batch_no: data.batchNo || null,
@@ -240,17 +243,19 @@ const transactionAPI_module = {
                 transaction_date: new Date().toISOString(),
                 pending_sync: true
             };
-            const idbPayload = { ...localTxData, productCode: localTxData.product_code, transactionDate: localTxData.transaction_date };
+            // localTxData already has product_code
+            const idbPayload = { ...localTxData, product_code: localTxData.product_code, transactionDate: localTxData.transaction_date }; // CHANGED key
 
 
-            let aggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, data.productCode);
+            let aggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, data.product_code); // CHANGED data.product_code
             if (!aggItem) {
-                console.warn(`Outbound offline: Aggregated item for ${data.productCode} not found in IDB.`);
-                aggItem = { productCode: data.productCode, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() };
+                console.warn(`Outbound offline: Aggregated item for ${data.product_code} not found in IDB.`); // CHANGED
+                // INVENTORY store keyPath is 'product_code'
+                aggItem = { product_code: data.product_code, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() }; // CHANGED
             }
             const currentWarehouseQty = aggItem.quantitiesByWarehouseId[data.warehouseId] || 0;
             if (currentWarehouseQty < quantity) {
-                console.warn(`Offline outbound for ${data.productCode} in ${data.warehouseId}: Requested ${quantity}, available in cache ${currentWarehouseQty}. Stock may go negative.`);
+                console.warn(`Offline outbound for ${data.product_code} in ${data.warehouseId}: Requested ${quantity}, available in cache ${currentWarehouseQty}. Stock may go negative.`); // CHANGED
             }
             aggItem.totalQuantity = (aggItem.totalQuantity || 0) - quantity;
             aggItem.quantitiesByWarehouseId[data.warehouseId] = currentWarehouseQty - quantity;
@@ -323,8 +328,8 @@ const transactionAPI_module = {
             const logPayload = {
                 type: "outbound",
                 inventory_id: data.inventoryId, // Schema name
-                product_id: data.productId || inventoryItem.product_id,
-                product_code: inventoryItem.product_code || data.productCode,
+                product_id: data.productId || inventoryItem.product_id, // Assuming productId is distinct
+                product_code: inventoryItem.product_code || data.product_code, // CHANGED data.productCode to data.product_code
                 product_name: inventoryItem.product_name || data.productName, // Assuming product_name is in inventory table
                 warehouse_id: inventoryItem.warehouse_id,
                 batch_no: inventoryItem.batch_no || null, // Assuming batch_no from inventory table
@@ -414,7 +419,7 @@ const transactionAPI_module = {
                     const txData = {
                         ...recordToProcess,
                         id: recordToProcess.id, // ensure 'id' is used consistently
-                        productCode: recordToProcess.product_code,
+                        product_code: recordToProcess.product_code, // CHANGED key
                         transactionDate: recordToProcess.transaction_date
                     };
 
@@ -485,13 +490,13 @@ const transactionAPI_module = {
         console.log("[performInternalTransfer] Initiated with data (Supabase):", JSON.parse(JSON.stringify(transferData)));
         await ensureDbManager();
         const {
-            productId, productCode, productName,
+            productId, product_code, productName, // CHANGED productCode to product_code
             sourceWarehouseId, destinationWarehouseId,
             quantity, operatorId, batchNo, // This is product's batchNo
             sourceBatchDocId // This is the ID of the inventory item (row) in 'inventory' table
         } = transferData;
 
-        if (!productCode || !sourceWarehouseId || !destinationWarehouseId || !quantity || isNaN(Number(quantity))) {
+        if (!product_code || !sourceWarehouseId || !destinationWarehouseId || !quantity || isNaN(Number(quantity))) { // CHANGED
             console.error("[performInternalTransfer] Invalid transferData (Supabase):", JSON.parse(JSON.stringify(transferData)));
             throw new Error("Invalid data for internal transfer. Missing required fields or invalid quantity.");
         }
@@ -501,8 +506,8 @@ const transactionAPI_module = {
 
         // Map to Supabase column names
         const commonTxPayload = {
-            product_id: productId || null,
-            product_code: productCode,
+            product_id: productId || null, // Assuming productId is distinct
+            product_code: product_code, // CHANGED
             product_name: productName,
             quantity: numericQuantity,
             operator_id: operatorId,
@@ -586,8 +591,9 @@ const transactionAPI_module = {
             console.log("[performInternalTransfer] OFFLINE mode (Supabase).");
 
             // Optimistically update IndexedDB inventory_aggregated
-            let sourceAggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, productCode);
-            if (!sourceAggItem) sourceAggItem = { productCode, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() };
+            // INVENTORY store in IDB is keyed by product_code
+            let sourceAggItem = await window.indexedDBManager.getItem(window.indexedDBManager.STORE_NAMES.INVENTORY, product_code); // CHANGED
+            if (!sourceAggItem) sourceAggItem = { product_code: product_code, totalQuantity: 0, quantitiesByWarehouseId: {}, lastUpdated: new Date().toISOString() }; // CHANGED
             sourceAggItem.quantitiesByWarehouseId[sourceWarehouseId] = (sourceAggItem.quantitiesByWarehouseId[sourceWarehouseId] || 0) - numericQuantity;
             // No change to totalQuantity here as it's an internal movement, just warehouse counts change.
             // However, the destination warehouse also needs an update.
@@ -595,18 +601,18 @@ const transactionAPI_module = {
             sourceAggItem.lastUpdated = new Date().toISOString();
             sourceAggItem.pendingSync = true;
             await window.indexedDBManager.updateItem(window.indexedDBManager.STORE_NAMES.INVENTORY, sourceAggItem);
-            console.log(`[performInternalTransfer] OFFLINE: Updated IndexedDB INVENTORY for productCode: ${productCode} (both source and dest warehouses).`);
+            console.log(`[performInternalTransfer] OFFLINE: Updated IndexedDB INVENTORY for product_code: ${product_code} (both source and dest warehouses).`); // CHANGED
 
 
             // Queue outbound transaction
             const localOutboundTx = {
-                ...outboundTxPayload, // Uses Supabase field names
+                ...outboundTxPayload, // Uses Supabase field names (which includes product_code)
                 id: `local_tx_out_${new Date().getTime()}_${Math.random().toString(36).substr(2, 5)}`,
                 transaction_date: new Date().toISOString(),
                 pending_sync: true
             };
-             // Map back to JS field names for IDB if needed
-            const idbOutboundPayload = { ...localOutboundTx, productCode: localOutboundTx.product_code, transactionDate: localOutboundTx.transaction_date, warehouseId: localOutboundTx.warehouse_id };
+             // Map back to JS field names for IDB if needed. localOutboundTx already has product_code.
+            const idbOutboundPayload = { ...localOutboundTx, product_code: localOutboundTx.product_code, transactionDate: localOutboundTx.transaction_date, warehouseId: localOutboundTx.warehouse_id }; // CHANGED key to product_code
 
             await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE, {
                 storeName: 'transactions', operation: 'internal_transfer_out', payload: idbOutboundPayload, timestamp: new Date().toISOString()
@@ -616,12 +622,13 @@ const transactionAPI_module = {
 
             // Queue inbound transaction
             const localInboundTx = {
-                ...inboundTxPayload, // Uses Supabase field names
+                ...inboundTxPayload, // Uses Supabase field names (which includes product_code)
                 id: `local_tx_in_${new Date().getTime()}_${Math.random().toString(36).substr(2, 5)}`,
                 transaction_date: new Date().toISOString(),
                 pending_sync: true
             };
-            const idbInboundPayload = { ...localInboundTx, productCode: localInboundTx.product_code, transactionDate: localInboundTx.transaction_date, warehouseId: localInboundTx.warehouse_id };
+            // localInboundTx already has product_code
+            const idbInboundPayload = { ...localInboundTx, product_code: localInboundTx.product_code, transactionDate: localInboundTx.transaction_date, warehouseId: localInboundTx.warehouse_id }; // CHANGED key to product_code
 
             await window.indexedDBManager.addItem(window.indexedDBManager.STORE_NAMES.OFFLINE_QUEUE, {
                 storeName: 'transactions', operation: 'internal_transfer_in', payload: idbInboundPayload, timestamp: new Date().toISOString()
