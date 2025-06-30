@@ -156,7 +156,7 @@ function renderProductsTable(products) {
         }
 
         row.innerHTML = `
-            <td>${escapeHtml(product.productCode || '')}</td>
+            <td>${escapeHtml(product.product_code || '')}</td>
             <td>${productDescription}</td>
             <td>${escapeHtml(product.packaging || '')}</td>
             <td>${escapeHtml(createdAtDisplay)}</td>
@@ -239,8 +239,8 @@ function loadAddProductForm(contentElement) {
             <h1>Add Product</h1>
             <form id="product-form">
                 <div class="form-group">
-                    <label for="productCode">Item Code*</label>
-                    <input type="text" id="productCode" name="productCode" required>
+                    <label for="product_code">Item Code*</label>
+                    <input type="text" id="product_code" name="product_code" required>
                 </div>
                 <div class="form-group">
                     <label for="name">Product Description*</label>
@@ -271,7 +271,7 @@ async function handleAddProduct(e, contentElement) {
     }
     const form = e.target;
     const productData = {
-        productCode: form.productCode.value,
+        product_code: form.product_code.value, // Key changed, and access form.product_code
         name: form.name.value,
         packaging: form.packaging.value
     };
@@ -310,7 +310,7 @@ async function viewProduct(productId) {
                 try { createdAtString = new Date(product.createdAt).toLocaleString(); } catch (e) { console.warn("Error parsing createdAt for view", e); }
             }
             const chineseNameDisplay = product['Chinese Name'] ? `<br>Chinese Name: ${escapeHtml(product['Chinese Name'])}` : '';
-            const message = `Product Details:<br>ID: ${escapeHtml(product.id)}<br>Code: ${escapeHtml(product.productCode)}<br>Name: ${escapeHtml(product.name)}${chineseNameDisplay}<br>Packaging: ${escapeHtml(product.packaging)}<br>Created At: ${escapeHtml(createdAtString)}`;
+            const message = `Product Details:<br>ID: ${escapeHtml(product.id)}<br>Code: ${escapeHtml(product.product_code)}<br>Name: ${escapeHtml(product.name)}${chineseNameDisplay}<br>Packaging: ${escapeHtml(product.packaging)}<br>Created At: ${escapeHtml(createdAtString)}`; // CHANGED product.productCode
             if (typeof window.displayPageMessage === 'function') {
                 window.displayPageMessage(message, 'info');
             } else {
