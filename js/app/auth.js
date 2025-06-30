@@ -1,5 +1,5 @@
 // Authentication module: handles Firebase auth state changes and UI updates.
-import { initializeFirestoreListeners } from './firestoreListeners.js';
+import { initializeSupabaseListeners } from './supabaseListeners.js'; // UPDATED import
 import { initNavigation } from './navigation.js';
 import { loadDashboard } from './pageLoader.js';
 
@@ -44,12 +44,12 @@ export function initAuth(mainContentArea, sidebar, sidebarToggle, pageLoaders, n
             }
 
 
-            // Initialize Firestore Listeners
-            // Ensure pageLoaders are correctly passed and structured for initializeFirestoreListeners
-            if (typeof initializeFirestoreListeners === 'function') {
-                 initializeFirestoreListeners(mainContentArea, pageLoaders);
+            // Initialize Supabase Listeners
+            // Ensure pageLoaders are correctly passed and structured for initializeSupabaseListeners
+            if (typeof initializeSupabaseListeners === 'function') { // UPDATED function name check
+                 initializeSupabaseListeners(mainContentArea, pageLoaders); // UPDATED function call
             } else {
-                console.error("Auth.js: initializeFirestoreListeners is not available.");
+                console.error("Auth.js: initializeSupabaseListeners is not available."); // UPDATED error message
             }
 
 
