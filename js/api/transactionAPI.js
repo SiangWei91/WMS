@@ -143,8 +143,8 @@ const transactionAPI_module = {
         // Map to Supabase column names
         const transactionPayload = {
             type: "inbound",
-            product_id: data.productId, // Schema uses product_id - assuming this is a distinct identifier
-            product_code: data.product_code, // CHANGED - data now provides product_code
+            // product_id: data.productId, // Schema uses product_id - assuming this is a distinct identifier - REMOVED
+            product_code: data.product_code, // data now provides product_code, this is the correct field
             product_name: data.productName,
             warehouse_id: data.warehouseId,
             batch_no: data.batchNo || null, // This is operationReferenceBatchNo in internal transfers
@@ -212,8 +212,8 @@ const transactionAPI_module = {
         const quantity = Number(data.quantity);
         const transactionPayload = {
             type: "outbound",
-            product_id: data.productId, // Assuming distinct identifier
-            product_code: data.product_code, // CHANGED - data now provides product_code
+            // product_id: data.productId, // Assuming distinct identifier - REMOVED
+            product_code: data.product_code, // data now provides product_code, this is the correct field
             product_name: data.productName,
             warehouse_id: data.warehouseId,
             batch_no: data.batchNo || null,
@@ -328,8 +328,8 @@ const transactionAPI_module = {
             const logPayload = {
                 type: "outbound",
                 inventory_id: data.inventoryId, // Schema name
-                product_id: data.productId || inventoryItem.product_id, // Assuming productId is distinct
-                product_code: inventoryItem.product_code || data.product_code, // CHANGED data.productCode to data.product_code
+                // product_id: data.productId || inventoryItem.product_id, // Assuming productId is distinct - REMOVED
+                product_code: inventoryItem.product_code || data.product_code, // This is the correct field
                 product_name: inventoryItem.product_name || data.productName, // Assuming product_name is in inventory table
                 warehouse_id: inventoryItem.warehouse_id,
                 batch_no: inventoryItem.batch_no || null, // Assuming batch_no from inventory table
@@ -506,13 +506,14 @@ const transactionAPI_module = {
 
         // Map to Supabase column names
         const commonTxPayload = {
-            product_id: productId || null, // Assuming productId is distinct
-            product_code: product_code, // CHANGED
+            // product_id: productId || null, // Assuming productId is distinct - REPLACED with product_code below
+            product_code: product_code, // This is the correct field for the transactions table
             product_name: productName,
             quantity: numericQuantity,
             operator_id: operatorId,
-            product_batch_no: batchNo, // Actual product batch number
-            batch_no: operationReferenceBatchNo, // Transfer operation reference
+            // product_batch_no: batchNo, // Actual product batch number - REPLACED KEY
+            batch_no: batchNo, // Actual product batch number - USING batch_no FOR PRODUCT'S BATCH
+            // batch_no: operationReferenceBatchNo, // Transfer operation reference - POTENTIAL CONFLICT / REDUNDANCY
         };
 
         const outboundTxPayload = {
@@ -535,22 +536,35 @@ const transactionAPI_module = {
             console.warn("performInternalTransfer (Supabase): For true atomicity, this should be an RPC call.");
             try {
                 // 1. Create outbound transaction
+                const finalOutboundPayload = { ...outboundTxPayload, transaction_date: new Date().toISOString() };
+                console.log("[performInternalTransfer] Attempting to insert OUTBOUND transaction with payload:", JSON.parse(JSON.stringify(finalOutboundPayload)));
                 const { data: outTx, error: outError } = await window.supabaseClient
                     .from('transactions')
-                    .insert({ ...outboundTxPayload, transaction_date: new Date().toISOString() })
+                    .insert(finalOutboundPayload)
                     .select()
                     .single();
-                if (outError) throw outError;
-                console.log(`[performInternalTransfer] Staged OUTBOUND tx (ID: ${outTx.id}) to Supabase.`);
+
+                if (outError) {
+                    console.error("[performInternalTransfer] CRITICAL ERROR during OUTBOUND Supabase transaction:", JSON.parse(JSON.stringify(outError)));
+                    throw outError;
+                }
+                console.log(`[performInternalTransfer] Staged OUTBOUND tx (ID: ${outTx.id}) to Supabase. Response:`, JSON.parse(JSON.stringify(outTx)));
 
                 // 2. Create inbound transaction
+                const finalInboundPayload = { ...inboundTxPayload, transaction_date: new Date().toISOString() };
+                console.log("[performInternalTransfer] Attempting to insert INBOUND transaction with payload:", JSON.parse(JSON.stringify(finalInboundPayload)));
                 const { data: inTx, error: inError } = await window.supabaseClient
                     .from('transactions')
-                    .insert({ ...inboundTxPayload, transaction_date: new Date().toISOString() })
+                    .insert(finalInboundPayload)
                     .select()
                     .single();
-                if (inError) throw inError; // TODO: Handle rollback of outTx if this fails
-                console.log(`[performInternalTransfer] Staged INBOUND tx (ID: ${inTx.id}) to Supabase.`);
+
+                if (inError) {
+                    console.error("[performInternalTransfer] CRITICAL ERROR during INBOUND Supabase transaction:", JSON.parse(JSON.stringify(inError)));
+                    // TODO: Handle rollback of outTx if this fails
+                    throw inError; 
+                }
+                console.log(`[performInternalTransfer] Staged INBOUND tx (ID: ${inTx.id}) to Supabase. Response:`, JSON.parse(JSON.stringify(inTx)));
 
                 // 3. Update source inventory batch quantity (if sourceBatchDocId is provided)
                 if (sourceBatchDocId) {
