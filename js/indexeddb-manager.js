@@ -352,6 +352,72 @@ window.indexedDBManager = {
     STORE_NAMES
 };
 
+/**
+ * Deletes multiple items from a specified object store using an array of keys.
+ * @param {string} storeName The name of the object store.
+ * @param {IDBValidKey[]} itemKeys Array of keys to delete.
+ * @returns {Promise<void>} A promise that resolves when all specified items have been attempted for deletion.
+ */
+async function bulkDeleteItems(storeName, itemKeys) {
+    if (!itemKeys || itemKeys.length === 0) {
+        return Promise.resolve();
+    }
+    const currentDb = await initDB();
+    return new Promise((resolve, reject) => {
+        const transaction = currentDb.transaction(storeName, 'readwrite');
+        const store = transaction.objectStore(storeName);
+        let itemsProcessed = 0;
+        let errorsEncountered = 0;
+
+        itemKeys.forEach(key => {
+            const request = store.delete(key);
+            request.onsuccess = () => {
+                itemsProcessed++;
+                if (itemsProcessed === itemKeys.length) {
+                    // All delete operations have been initiated
+                }
+            };
+            request.onerror = (event) => {
+                itemsProcessed++; // Still counts as processed for completion check
+                errorsEncountered++;
+                console.error(`Error deleting item with key ${key} in bulk operation for store ${storeName}:`, event.target.error);
+                // Continue with other deletions
+            };
+        });
+
+        transaction.oncomplete = () => {
+            if (errorsEncountered > 0) {
+                console.warn(`Bulk delete for store ${storeName} completed with ${errorsEncountered} error(s) out of ${itemKeys.length} items.`);
+            } else {
+                console.log(`Bulk delete: Successfully processed ${itemKeys.length} delete operations for store ${storeName}.`);
+            }
+            resolve(); // Resolve even if some individual deletes failed, as the transaction completed.
+        };
+        transaction.onerror = (event) => {
+            console.error(`Error in bulk delete transaction for store ${storeName}:`, event.target.error);
+            reject(`Bulk delete transaction error for ${storeName}: ${event.target.error}`);
+        };
+    });
+}
+
+// Re-expose with the new function
+// This overwrites the previous window.indexedDBManager assignment
+window.indexedDBManager = {
+    initDB,
+    addItem,
+    getItem,
+    getAllItems,
+    updateItem,
+    deleteItem,
+    getItemsByIndex,
+    clearStore,
+    bulkPutItems,
+    bulkDeleteItems, // Added bulkDeleteItems
+    countItems,
+    STORE_NAMES
+};
+
+
 let dbInitializationPromise = null;
 
 function initializeDBOnce() {
