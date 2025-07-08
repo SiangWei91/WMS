@@ -147,10 +147,10 @@ async function loadJordonPage(mainContentArea) {
         contentArea.innerHTML = await response.text();
         
         const module = await import('../jordon.js'); // Adjusted path
-        if (module.initJordonPage && typeof module.initJordonPage === 'function') {
+        if (module.initJordonPage && typeof module.initJordonPage === 'function') { // Legacy check
             module.initJordonPage(contentArea);
-        } else if (module.initJordonTabs && typeof module.initJordonTabs === 'function') {
-            console.warn("initJordonPage not found in jordon.js, using module.initJordonTabs.");
+        } else if (module.initJordonTabs && typeof module.initJordonTabs === 'function') { // Current expected export
+            // console.warn("initJordonPage not found in jordon.js, using module.initJordonTabs."); // Not needed if initJordonTabs is standard
             module.initJordonTabs(contentArea);
         } else {
             console.error("Neither initJordonPage nor initJordonTabs found in jordon.js module.");
@@ -158,6 +158,25 @@ async function loadJordonPage(mainContentArea) {
     } catch (error) {
         console.error('Failed to load Jordon page HTML or module:', error);
         contentArea.innerHTML = '<h1>Error loading Jordon page</h1>';
+    }
+}
+
+async function loadLineagePage(mainContentArea) { // New function for Lineage
+    const contentArea = ensureMainContentArea(mainContentArea);
+    try {
+        const response = await fetch('../lineage.html'); // Path to lineage.html
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        contentArea.innerHTML = await response.text();
+        
+        const module = await import('../lineage.js'); // Path to lineage.js
+        if (module.initLineageTabs && typeof module.initLineageTabs === 'function') {
+            module.initLineageTabs(contentArea);
+        } else {
+            console.error("initLineageTabs function not found in lineage.js module.");
+        }
+    } catch (error) {
+        console.error('Failed to load Lineage page HTML or module:', error);
+        contentArea.innerHTML = '<h1>Error loading Lineage page</h1>';
     }
 }
 
@@ -267,7 +286,7 @@ export function loadPage(page, mainContentArea) {
             loadJordonPage(contentArea);
             break;
         case 'lineage':
-            contentArea.innerHTML = '<h1>Lineage (Coming Soon)</h1>';
+            loadLineagePage(contentArea); // Changed to call the new function
             break;
         case 'singlong':
             contentArea.innerHTML = '<h1>Sing Long (Coming Soon)</h1>';
