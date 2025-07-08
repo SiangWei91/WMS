@@ -12,15 +12,15 @@ export function initAuth(mainContentArea, sidebar, sidebarToggle, pageLoaders, n
             let displayName = user.uid;
             try {
                 const idTokenResult = await user.getIdTokenResult(true);
-                if (idTokenResult.claims.name) {
-                    displayName = idTokenResult.claims.name;
+                if (idTokenResult.claims.name && idTokenResult.claims.name.trim() !== "") {
+                    displayName = idTokenResult.claims.name.trim();
                 }
             } catch (error) {
                 console.error('Error getting ID token result:', error);
             }
 
             sessionStorage.setItem('isAuthenticated', 'true');
-            sessionStorage.setItem('loggedInUser', displayName);
+            sessionStorage.setItem('loggedInUser', displayName); // displayName will be uid if claims.name is not present or empty
 
             if (sidebarToggle && sidebar && !sidebarToggleListenerAttached) {
                 sidebarToggle.addEventListener('click', function () {
