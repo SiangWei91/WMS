@@ -34,69 +34,114 @@ async function clearSupabaseTables(tableNames) {
 
   console.log('Starting to clear Supabase tables:', tableNames);
   let allSucceeded = true;
+  const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
   for (const tableName of tableNames) {
     try {
-      console.log(`Attempting to clear table: ${tableName}`);
-      // Supabase delete without a filter deletes all rows.
-      // The `match` filter with an empty object `{}` should not be needed,
-      // but using a non-empty object ensures we don't accidentally delete without any condition.
-      // However, to delete all rows, the condition should select all rows, e.g. by matching a common non-null column to not be null.
-      // Or, more simply, just use .delete() and it applies to the whole table if no filters applied before it.
-      // For safety, Supabase RLS should be configured to allow this, or run this with service_role key if from a secure backend.
-      // From client-side with anon_key, this depends on table permissions.
-      // Let's assume RLS allows delete for the user, or this is run by an admin.
-      // A common way to delete all rows is `delete from table_name where true;` in SQL.
-      // Supabase client equivalent:
-      const { error, count } = await window.supabaseClient
-        .from(tableName)
-        .delete()
-        .neq('id', 'this-id-should-not-exist-unless-you-have-it'); // A dummy condition that should effectively match all rows or be optimized away by Supabase
-                                                                // More robust: .delete().match({ some_column: value_that_matches_all }) - but that's not generic.
-                                                                // Safest client-side delete all is often to call an RPC function.
-                                                                // For now, using a condition that is likely true for all or many rows.
-                                                                // A simpler .delete().gt('id', 0) if id is numeric, or similar for UUID.
-                                                                // The most straightforward is just .delete() with no other filters.
-                                                                // Let's try with a condition that should always be true for any row.
-                                                                // Example: if all your tables have a primary key 'id' that's a UUID (string) or number.
-                                                                // This is a placeholder, actual implementation might depend on table structures or using an RPC.
-                                                                // For this example, let's use a common pattern that might work if 'id' exists and is text/varchar.
-                                                                // It's better to call an RPC function `truncate_table(table_name)`
-                                                                // For now, this is a placeholder for a real "delete all"
-      // const { error, count } = await window.supabaseClient.from(tableName).delete().neq('id', '00000000-0000-0000-0000-000000000000'); // Example for UUID
-      // A simpler, more common way:
-      // Updated to use .neq to satisfy "DELETE requires a WHERE clause"
-      const { error: deleteError } = await window.supabaseClient
-        .from(tableName)
-        .delete()
-        .neq('id', 'this-is-a-dummy-value-that-should-not-match-any-actual-id'); // Provides a WHERE clause
+      console.log(`[SupabaseAdmin] Attempting to clear table: ${tableName}`);
+      let response = { error: null, data: null, count: null }; // Ensure response is initialized for logging clarity
 
-      if (deleteError) {
-        console.error(`Error clearing table ${tableName}:`, deleteError);
-        if (typeof window.displayPageMessage === 'function') {
-          window.displayPageMessage(`Failed to clear table ${tableName}. Error: ${deleteError.message}`, 'error');
-        } else {
-          alert(`Failed to clear table ${tableName}. Check console for details. Error: ${deleteError.message}`);
+      if (tableName === 'jordonWithdrawForms') {
+        console.log(`[SupabaseAdmin] Processing ${tableName} (strategy: jordonWithdrawForms)`);
+        response = await window.supabaseClient
+          .from(tableName)
+          .delete()
+          .neq('id', NIL_UUID); 
+
+        if (response.error) {
+          if (response.error.code === '42P01' || (response.error.message && response.error.message.includes('relation "public.jordonWithdrawForms" does not exist'))) {
+            console.warn(`[SupabaseAdmin] Table ${tableName} does not exist, skipping. Error details:`, response.error);
+            continue; 
+          } else {
+            console.error(`[SupabaseAdmin] Error for ${tableName} before throwing:`, response.error);
+            throw response.error; 
+          }
         }
-        allSucceeded = false;
-        continue; // Continue with the next table
-      }
-      
-      // Supabase delete doesn't directly return the count of deleted rows in the same way as Firestore batch delete.
-      // The 'count' variable from { error, count } with .delete() is for options like 'exact', 'planned', 'estimated'.
-      // We can assume success if no error.
-      console.log(`Successfully cleared data from table: ${tableName}. (Actual row count not directly available from this client operation)`);
+        console.log(`[SupabaseAdmin] Deletion response for ${tableName}:`, response);
+      } else if (tableName === 'inventory_aggregated') {
+        console.log(`[SupabaseAdmin] Processing ${tableName} (strategy: inventory_aggregated)`);
+        response = await window.supabaseClient
+          .from(tableName)
+          .delete()
+          .not('product_Code', 'is', null); 
 
-    } catch (error) { // Catch any other unexpected errors
-      console.error(`Unexpected error clearing table ${tableName}:`, error);
-      if (typeof window.displayPageMessage === 'function') {
-        window.displayPageMessage(`Unexpected error clearing table ${tableName}. Error: ${error.message}`, 'error');
+        if (response.error) {
+          console.error(`[SupabaseAdmin] Error for ${tableName} before throwing:`, response.error);
+          throw response.error;
+        }
+        console.log(`[SupabaseAdmin] Deletion response for ${tableName}:`, response);
+      } else if (tableName === 'inventory') { 
+        console.log(`[SupabaseAdmin] Processing ${tableName} (strategy: inventory)`);
+        // Assuming 'inventory' table also might be better cleared by a non-id field.
+        // Using .not('product_code', 'is', null) as a tentative strategy.
+        // This assumes 'inventory' has 'product_code'. If not, this will fail and logs should show it.
+        response = await window.supabaseClient
+          .from(tableName)
+          .delete()
+          .not('product_code', 'is', null); // Tentative: assuming product_code exists and is not null for all rows.
+
+        if (response.error) {
+          console.error(`[SupabaseAdmin] Error for ${tableName} before throwing:`, response.error);
+          throw response.error;
+        }
+        console.log(`[SupabaseAdmin] Deletion response for ${tableName}:`, response);
+      } else if (tableName === 'transactions') {
+        console.log(`[SupabaseAdmin] Processing ${tableName} (strategy: transactions)`);
+        response = await window.supabaseClient
+          .from(tableName)
+          .delete()
+          .neq('id', NIL_UUID);
+
+        if (response.error) {
+          console.error(`[SupabaseAdmin] Error for ${tableName} before throwing:`, response.error);
+          throw response.error;
+        }
+        console.log(`[SupabaseAdmin] Deletion response for ${tableName}:`, response);
       } else {
-        alert(`Unexpected error clearing table ${tableName}. Check console for details. Error: ${error.message}`);
+        console.log(`[SupabaseAdmin] Processing ${tableName} (strategy: default)`);
+        response = await window.supabaseClient
+          .from(tableName)
+          .delete()
+          .neq('id', NIL_UUID);
+
+        if (response.error) {
+          console.error(`[SupabaseAdmin] Error for ${tableName} before throwing:`, response.error);
+          throw response.error;
+        }
+        console.log(`[SupabaseAdmin] Deletion response for ${tableName}:`, response);
+      }
+
+      // Log success if no error was thrown by the Supabase client for the current table operation
+      // The 'response.error' here is the direct result from the Supabase call.
+      if (!response.error) {
+        console.log(`[SupabaseAdmin] Successfully cleared/processed table: ${tableName}.`);
+      } else {
+        // This case should ideally be caught by "throw response.error" and handled in the catch block.
+        // However, adding a log here for completeness if an error exists but wasn't thrown.
+        console.warn(`[SupabaseAdmin] Table ${tableName} processed, but Supabase response contained an error:`, response.error);
+      }
+
+    } catch (error) { // Catch any errors thrown from the try block
+      console.error(`[SupabaseAdmin] Error caught for table ${tableName} in main catch block:`, error);
+      if (typeof window.displayPageMessage === 'function') {
+        window.displayPageMessage(`Failed to process table ${tableName}. Error: ${error.message || JSON.stringify(error)}`, 'error');
+      } else {
+        alert(`Failed to process table ${tableName}. Check console for details. Error: ${error.message || JSON.stringify(error)}`);
       }
       allSucceeded = false;
     }
   }
+
+  // The following block was identified as erroneous and is removed.
+  // if (allSucceeded) {
+  //     if (typeof window.displayPageMessage === 'function') {
+  //       window.displayPageMessage(`Unexpected error clearing table ${tableName}. Error: ${error.message}`, 'error');
+  //     } else {
+  //       alert(`Unexpected error clearing table ${tableName}. Check console for details. Error: ${error.message}`);
+  //     }
+  //     allSucceeded = false;
+  //   }
+  // }
 
   if (allSucceeded) {
     if (typeof window.displayPageMessage === 'function') {
