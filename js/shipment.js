@@ -213,6 +213,77 @@ function extractJordonData(jordonSheet, sheet1LookupMap) {
     }
     return extractedItems;
 }
+
+function extractLineageData(lineageSheet, sheet1LookupMap) {
+    const extractedItems = [];
+    if (!lineageSheet) return extractedItems;
+    const lineageSheetData = XLSX.utils.sheet_to_json(lineageSheet, { header: 1, defval: '' });
+    for (let rowIndex = 14; rowIndex < lineageSheetData.length; rowIndex++) {
+        const row = lineageSheetData[rowIndex];
+        if (!row) continue;
+
+        // Product Description: Column C (index 2)
+        const productDescription = row[2] ? String(row[2]).trim() : "";
+        // Stop if product description is empty (assuming this is still the key indicator for end of data)
+        if (productDescription === "") break; 
+
+        // LLM Item Code: Column D (index 3)
+        const llmItemCode = row[3] ? String(row[3]).trim() : "";
+        
+        // Packing Size: Column E (index 4)
+        const packingSize = row[4] ? String(row[4]).trim() : "";
+
+        // Pallet: Column F (index 5)
+        let rawPalletValueFromCell;
+        if (row[5] === 0) { 
+            rawPalletValueFromCell = "0";
+        } else if (row[5]) { 
+            rawPalletValueFromCell = String(row[5]).trim();
+        } else { 
+            rawPalletValueFromCell = "";
+        }
+        let pallet = rawPalletValueFromCell; 
+        const indexOfX = rawPalletValueFromCell.indexOf('x');
+        if (indexOfX > -1) { 
+            pallet = rawPalletValueFromCell.substring(indexOfX + 1).trim();
+        }
+
+        // Quantity: Column H (index 7)
+        const quantity = row[7] ? String(row[7]).trim() : ""; 
+
+        // Batch No: Column I (index 8)
+        let batchNo = "";
+        const batchNoCellAddress = XLSX.utils.encode_cell({c: 8, r: rowIndex}); // Column I
+        const batchNoCell = lineageSheet[batchNoCellAddress];
+        if (batchNoCell && batchNoCell.w) { // Prefer formatted string
+            batchNo = String(batchNoCell.w).trim();
+            batchNo = reformatDateToDDMMYYYY(batchNo);
+        } else if (batchNoCell && batchNoCell.v !== undefined) { // Fallback to raw value
+            let potentialDateStr = String(batchNoCell.v).trim();
+            if (potentialDateStr.match(/^\d{1,2}\/\d{1,2}\/\d{2,4}$/)) {
+                 batchNo = reformatDateToDDMMYYYY(potentialDateStr);
+            } else {
+                 batchNo = potentialDateStr; 
+            }
+        }
+        
+        // Item Code: Column J (index 9)
+        const itemCode = row[9] ? String(row[9]).trim() : "";
+
+        const item = { 
+            itemCode, 
+            productDescription, 
+            llmItemCode, // Added LLM Item Code
+            packingSize, 
+            batchNo, 
+            quantity, 
+            pallet, 
+            excelRowNumber: rowIndex + 1 
+        };
+        extractedItems.push(item);
+    }
+    return extractedItems;
+}
   
 function extractDataForView(sheetData, viewConfig, sheet1LookupMap) {
     const viewResults = [];
@@ -265,7 +336,15 @@ function displayExtractedData(data) {
         const activeViewName = getActiveViewName();
         let headers = ['Item Code', 'Product Description', 'Packing Size', 'Batch No', 'Quantity'];
         let currentDataKeys = ['itemCode', 'productDescription', 'packingSize', 'batchNo', 'quantity'];
-        if (activeViewName === 'Jordon') {
+        
+        if (activeViewName === 'Lineage') {
+            // For Lineage: Add "LLM Item Code" after "Product Description"
+            headers.splice(headers.indexOf('Product Description') + 1, 0, 'LLM Item Code');
+            currentDataKeys.splice(currentDataKeys.indexOf('productDescription') + 1, 0, 'llmItemCode');
+        }
+
+        // Jordon and Lineage are assumed to have pallet information
+        if (activeViewName === 'Jordon' || activeViewName === 'Lineage') { 
             headers.splice(headers.indexOf('Quantity') + 1, 0, 'Pallet');
             currentDataKeys.splice(currentDataKeys.indexOf('quantity') + 1, 0, 'pallet');
         }
@@ -300,7 +379,8 @@ function displayExtractedData(data) {
 
         data.forEach(item => {
             totalQuantity += parseFloat(item.quantity || 0);
-            if (activeViewName === 'Jordon' && item.pallet !== undefined) {
+            // Jordon and Lineage are assumed to have pallet information
+            if ((activeViewName === 'Jordon' || activeViewName === 'Lineage') && item.pallet !== undefined) {
                 totalPallets += parseFloat(item.pallet || 0);
             }
         });
@@ -308,7 +388,8 @@ function displayExtractedData(data) {
         html += '<tfoot><tr>';
 
         const quantityColIdx = currentDataKeys.indexOf('quantity');
-        const palletColIdx = activeViewName === 'Jordon' ? currentDataKeys.indexOf('pallet') : -1;
+        // Check for pallet column if view is Jordon or Lineage
+        const palletColIdx = (activeViewName === 'Jordon' || activeViewName === 'Lineage') ? currentDataKeys.indexOf('pallet') : -1;
 
         // Create an array for footer cells, initialize with empty strings
         const numFooterCells = currentDataKeys.length + 1; // +1 for the remove column placeholder
@@ -461,10 +542,12 @@ async function _processShipmentDataOnline(allExtractedData, containerNumber, sto
                             palletType: "pending", // Default
                             location: "", // Default
                             dateStored: storedDate ? new Date(storedDate.split('/').reverse().join('-')).toISOString() : null, // Convert DD/MM/YYYY to ISO
-                            pallet: (viewName === 'Jordon' && item.pallet !== undefined) ? (Number(String(item.pallet || '0').trim()) || 0) : null
+                            // Jordon and Lineage are assumed to have pallet information for 3PL
+                            pallet: ((viewName === 'Jordon' || viewName === 'Lineage') && item.pallet !== undefined) ? (Number(String(item.pallet || '0').trim()) || 0) : null
                         };
                     }
-                    if (viewName === 'Jordon' && item.hasOwnProperty('excelRowNumber')) {
+                    // Jordon and Lineage are assumed to have excelRowNumber
+                    if ((viewName === 'Jordon' || viewName === 'Lineage') && item.hasOwnProperty('excelRowNumber')) {
                         inventoryPayload.excel_row_number = item.excelRowNumber; // Ensure column name matches
                     }
                     
@@ -719,6 +802,7 @@ function processNewFile(file) {
             if (typeof XLSX === 'undefined') throw new Error("SheetJS library (XLSX) not loaded.");
             const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
             const jordonSheet = workbook.Sheets['Jordon'];
+            const lineageSheet = workbook.Sheets['Lineage']; // Get Lineage sheet
             const sheet1 = workbook.Sheets['sheet 1']; // lowercase 's'
   
             if (sheet1) {
@@ -771,8 +855,18 @@ function processNewFile(file) {
                     shipmentModuleState.allExtractedData['Jordon'] = [];
                 }
             }
+            if (lineageSheet && typeof extractLineageData === 'function') { // Process Lineage sheet
+                try {
+                    shipmentModuleState.allExtractedData['Lineage'] = extractLineageData(lineageSheet, sheet1LookupMap);
+                } catch (lineageError) {
+                    console.error('Error during Lineage-specific extraction:', lineageError);
+                    displayPageMessage(`Error processing Lineage sheet data: ${lineageError.message}`, 'warning');
+                    shipmentModuleState.allExtractedData['Lineage'] = [];
+                }
+            }
             shipmentModuleState.viewDefinitions.forEach(viewDef => {
-                if (!(viewDef.name === 'Jordon' && jordonSheet)) { // Don't re-process Jordon if already done
+                // Don't re-process Jordon or Lineage if they were handled by their specific functions
+                if (!((viewDef.name === 'Jordon' && jordonSheet) || (viewDef.name === 'Lineage' && lineageSheet))) { 
                     try {
                         shipmentModuleState.allExtractedData[viewDef.name] = extractDataForView(convertSheetData, viewDef, sheet1LookupMap);
                     } catch (viewError) {
