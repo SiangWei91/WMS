@@ -65,12 +65,11 @@ async function clearSupabaseTables(tableNames) {
                                                                 // For now, this is a placeholder for a real "delete all"
       // const { error, count } = await window.supabaseClient.from(tableName).delete().neq('id', '00000000-0000-0000-0000-000000000000'); // Example for UUID
       // A simpler, more common way:
-      const { data, error: deleteError } = await window.supabaseClient
+      // Updated to use .neq to satisfy "DELETE requires a WHERE clause"
+      const { error: deleteError } = await window.supabaseClient
         .from(tableName)
         .delete()
-        .gte('id', 0); // This assumes 'id' is a numeric PK and >= 0. Adjust if PK is different (e.g. text/UUID).
-                       // If 'id' is text/UUID, a condition like .neq('id', 'a-value-that-never-exists') works.
-                       // Or, if RLS allows, simply .delete() with no other chained filters.
+        .neq('id', 'this-is-a-dummy-value-that-should-not-match-any-actual-id'); // Provides a WHERE clause
 
       if (deleteError) {
         console.error(`Error clearing table ${tableName}:`, deleteError);
