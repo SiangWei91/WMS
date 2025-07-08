@@ -1,5 +1,4 @@
 // Main application logic (app.js)
-import { initializeReadCounter } from './firebaseReadCounter.js';
 import { initAuth } from './app/auth.js';
 // Page specific loaders - these are imported here because they are passed to auth.js -> firestoreListeners.js
 import { loadProducts } from './products.js';
@@ -17,7 +16,7 @@ import { loadPage, loadDashboard } from './app/pageLoader.js';
 let mainContentArea = null; // Cache for the main content DOM element
 
 document.addEventListener('DOMContentLoaded', function () {
-    initializeReadCounter(); // Initialize the counter and display
+    // initializeReadCounter(); // Removed this line
 
     mainContentArea = document.getElementById('content');
     if (!mainContentArea) {
@@ -72,12 +71,12 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // Event listener for the "Clear Firestore" button
+    // Event listener for the "Clear Supabase Data" button
     // This also remains in app.js for now, as it's a global admin action.
     // It could be further modularized if other admin functionalities are added.
-    const dropdownClearFirestoreButton = document.getElementById('dropdown-clear-firestore-button');
-    if (dropdownClearFirestoreButton) {
-        dropdownClearFirestoreButton.addEventListener('click', async function(event) {
+    const dropdownClearSupabaseButton = document.getElementById('dropdown-clear-supabase-button');
+    if (dropdownClearSupabaseButton) {
+        dropdownClearSupabaseButton.addEventListener('click', async function(event) {
             event.preventDefault();
             if (typeof window.clearAllPageMessages === 'function') {
                 window.clearAllPageMessages();
@@ -91,14 +90,14 @@ document.addEventListener('DOMContentLoaded', function () {
             const collectionsToClear = [
                 'inventory',
                 'inventory_aggregated',
-                'jordonWithdrawForms',
+                // 'jordonWithdrawForms', // Table does not exist
                 'transactions'
                 // Add 'products' or other collections if they also need clearing
             ];
 
-            if (window.firestoreAdminAPI && typeof window.firestoreAdminAPI.clearFirestoreCollections === 'function') {
+            if (window.supabaseAdminAPI && typeof window.supabaseAdminAPI.clearSupabaseTables === 'function') {
                 try {
-                    await window.firestoreAdminAPI.clearFirestoreCollections(collectionsToClear);
+                    await window.supabaseAdminAPI.clearSupabaseTables(collectionsToClear);
                     
                     if (window.indexedDBManager && typeof window.indexedDBManager.clearStore === 'function') {
                         for (const collectionName of collectionsToClear) {
@@ -109,9 +108,9 @@ document.addEventListener('DOMContentLoaded', function () {
                                 storeToClear = window.indexedDBManager.STORE_NAMES.INVENTORY;
                             } else if (collectionName === 'inventory' && window.indexedDBManager.STORE_NAMES.INVENTORY_DETAIL) {
                                 // storeToClear = window.indexedDBManager.STORE_NAMES.INVENTORY_DETAIL; // Placeholder
-                                console.warn(`IndexedDB clearing for Firestore collection '${collectionName}' (inventory_detail) not explicitly mapped yet.`);
+                                console.warn(`IndexedDB clearing for Supabase table '${collectionName}' (inventory_detail) not explicitly mapped yet.`);
                             } else if (collectionName === 'jordonWithdrawForms') {
-                                console.warn(`IndexedDB clearing for Firestore collection '${collectionName}' not implemented.`);
+                                console.warn(`IndexedDB clearing for Supabase table '${collectionName}' not implemented.`);
                             }
                             // Example for products if it were added to collectionsToClear
                             // else if (collectionName === 'products' && window.indexedDBManager.STORE_NAMES.PRODUCTS) {
@@ -120,14 +119,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
 
                             if (storeToClear) {
-                                console.log(`Attempting to clear IndexedDB store: ${storeToClear} (mapped from Firestore collection: ${collectionName})`);
+                                console.log(`Attempting to clear IndexedDB store: ${storeToClear} (mapped from Supabase table: ${collectionName})`);
                                 await window.indexedDBManager.clearStore(storeToClear);
                             }
                         }
-                        // Also clear products from IDB if products collection is cleared from Firestore
+                        // Also clear products from IDB if products collection is cleared from Supabase
                         if (collectionsToClear.includes('products') && window.indexedDBManager.STORE_NAMES.PRODUCTS) {
                            // await window.indexedDBManager.clearStore(window.indexedDBManager.STORE_NAMES.PRODUCTS);
-                           // console.log("Cleared products store from IndexedDB as part of Firestore clear.");
+                           // console.log("Cleared products store from IndexedDB as part of Supabase clear.");
                         }
 
                     } else {
@@ -154,7 +153,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     // Add more conditions for other pages if needed
 
                 } catch (error) {
-                    console.error('Error during clear Firestore collections or IndexedDB stores:', error);
+                    console.error('Error during clear Supabase tables or IndexedDB stores:', error);
                     if (typeof window.displayPageMessage === 'function') {
                         window.displayPageMessage('An unexpected error occurred while clearing data. Check the console.', 'error');
                     } else {
@@ -162,11 +161,11 @@ document.addEventListener('DOMContentLoaded', function () {
                     }
                 }
             } else {
-                console.error('firestoreAdminAPI.clearFirestoreCollections is not available.');
+                console.error('supabaseAdminAPI.clearSupabaseTables is not available.');
                 if (typeof window.displayPageMessage === 'function') {
-                    window.displayPageMessage('Error: Clear collections functionality is not loaded correctly.', 'error');
+                    window.displayPageMessage('Error: Clear tables functionality is not loaded correctly.', 'error');
                 } else {
-                    alert('Error: Clear collections functionality is not loaded correctly.');
+                    alert('Error: Clear tables functionality is not loaded correctly.');
                 }
             }
         });
