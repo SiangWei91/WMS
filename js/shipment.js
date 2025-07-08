@@ -544,7 +544,11 @@ async function _processShipmentDataOnline(allExtractedData, containerNumber, sto
                             dateStored: storedDate ? new Date(storedDate.split('/').reverse().join('-')).toISOString() : null, // Convert DD/MM/YYYY to ISO
                             // Jordon and Lineage are assumed to have pallet information for 3PL
                             pallet: ((viewName === 'Jordon' || viewName === 'Lineage') && item.pallet !== undefined) ? (Number(String(item.pallet || '0').trim()) || 0) : null
+                            // Add llmItemCode to _3pl_details if it exists on the item
                         };
+                        if (item.hasOwnProperty('llmItemCode') && String(item.llmItemCode).trim() !== "") {
+                            inventoryPayload._3pl_details.llm_item_code = String(item.llmItemCode).trim();
+                        }
                     }
                     // Jordon and Lineage are assumed to have excelRowNumber
                     if ((viewName === 'Jordon' || viewName === 'Lineage') && item.hasOwnProperty('excelRowNumber')) {
