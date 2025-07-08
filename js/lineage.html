@@ -1,0 +1,133 @@
+<link rel="stylesheet" href="css/jordon.css" /> <!-- Assuming we reuse jordon.css for now, can change to lineage.css later -->
+<div class="lineage-page-container"> <!-- Changed class name -->
+  <div class="tabs-container">
+    <ul class="tabs-nav">
+      <li class="tab-item active" data-tab="inventory-summary">
+        Inventory Summary
+      </li>
+      <li class="tab-item" data-tab="stock-in">Stock In</li>
+      <li class="tab-item" data-tab="stock-out">Stock Out</li>
+      <li class="tab-item" data-tab="report">Report</li>
+    </ul>
+  </div>
+  <div class="tab-content-container">
+    <div class="tab-content active" id="lineage-inventory-summary-content"> <!-- Changed ID -->
+      <h2>Lineage Inventory Summary</h2> <!-- Changed Title -->
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Item Code</th>
+              <th>Product Description</th>
+              <th>LLM Item Code</th> <!-- Added New Column -->
+              <th>Packing Size</th>
+              <th>Pallet Type</th>
+              <th>Location</th>
+              <th>Lot Number</th>
+              <th>Batch Number</th>
+              <th>Date Stored</th>
+              <th>Container Number</th>
+              <th>Total Cartons</th>
+              <th>Pallets</th>
+            </tr>
+          </thead>
+          <tbody id="lineage-inventory-summary-tbody"> <!-- Changed ID -->
+            <!-- Content will be loaded by JS -->
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="10" style="text-align: right; font-weight: bold"> <!-- Adjusted colspan for new column -->
+                Total:
+              </td>
+              <td style="font-weight: bold" id="lineage-summary-total-cartons">0</td> <!-- Changed ID -->
+              <td style="font-weight: bold" id="lineage-summary-total-pallets">0</td> <!-- Changed ID -->
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+    <div class="tab-content" id="lineage-stock-in-content"> <!-- Changed ID -->
+      <h2>Lineage Stock In</h2> <!-- Changed Title -->
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Item Code</th>
+              <!-- Consider if LLM Item Code needed here -->
+              <th>Packing Size</th>
+              <th>Pallet Type</th>
+              <th>Location</th>
+              <th>Lot Number</th>
+              <th>Batch Number</th>
+              <th>Date Stored</th>
+              <th>Container Number</th>
+              <th>Ctn(s)</th>
+              <th>Plt</th>
+              <th>Mix ID</th>
+            </tr>
+          </thead>
+          <tbody id="lineage-stock-in-table-body"> <!-- Changed ID -->
+            <!-- Rows will be added here by JavaScript -->
+          </tbody>
+        </table>
+      </div>
+      <div style="margin-top: 15px; text-align: center; padding: 10px">
+        <button id="lineage-submit-stock-in-btn" class="btn btn-success"> <!-- Changed ID -->
+          Update Stock In
+        </button>
+      </div>
+    </div>
+    <div class="tab-content" id="lineage-stock-out-content"> <!-- Changed ID -->
+      <h2>Lineage Stock Out</h2> <!-- Changed Title -->
+      <div id="lineage-stock-out-controls" style="padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; background-color: #f9f9f9;"> <!-- Changed ID -->
+        <label for="lineage-withdraw-date">Withdraw Date:</label> <!-- Changed for -->
+        <input type="date" id="lineage-withdraw-date"> <!-- Changed ID -->
+        
+        <div class="collection-time-group">
+            <label for="lineage-collection-time-hh">Collection Time:</label> <!-- Changed for -->
+            <select id="lineage-collection-time-hh"> <!-- Changed ID -->
+              <option value="">HH</option>
+              <option value="01">01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option>
+              <option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option>
+              <option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option>
+            </select>
+            <label for="lineage-collection-time-mm" class="time-colon">:</label> <!-- Changed for -->
+            <select id="lineage-collection-time-mm"> <!-- Changed ID -->
+              <option value="">MM</option><option value="00">00</option><option value="30">30</option>
+            </select>
+            <select id="lineage-collection-time-ampm"> <!-- Changed ID -->
+              <option value="AM">AM</option><option value="PM">PM</option>
+            </select>
+        </div>
+      </div>
+      <div id="lineage-stock-out-list-container"> <!-- Changed ID -->
+        <!-- Stock out list table will be rendered here by js/lineage.js -->
+      </div>
+    </div>
+    <div class="tab-content" id="lineage-report-content"> <!-- Changed ID -->
+      <div id="lineage-report-content-container"> <!-- Changed ID -->
+        <p>Loading reports...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stock Out Popup -->
+  <div id="lineage-stock-out-popup" style="display: none"> <!-- Changed ID -->
+    <div class="popup-content">
+      <span class="close-btn">&times;</span> <!-- Assuming class is generic enough -->
+      <h2>Stock Out Item</h2> <!-- Title can be generic -->
+      <div class="popup-info-section">
+        <!-- Content will be dynamically populated by js/lineage.js -->
+      </div>
+      <div class="popup-input-section">
+        <!-- Inputs will be dynamically generated here -->
+      </div>
+      <div class="popup-buttons">
+        <button id="lineage-add-to-stock-out-list-btn">Add to Stock Out List</button> <!-- Changed ID -->
+        <button id="lineage-close-popup-btn">Close</button> <!-- Changed ID -->
+      </div>
+    </div>
+  </div>
+</div>
+<script src="js/lineage.js" defer></script> <!-- Changed script src -->
