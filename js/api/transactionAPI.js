@@ -8,37 +8,39 @@ const transactionAPI_module = {
     async getTransactions(params = {}) {
         console.log('[transactionAPI.getTransactions] Called with params:', JSON.parse(JSON.stringify(params)));
         await ensureDbManager();
-        const { product_code, type, startDate, endDate, limit = 10, currentPage = 1 } = params; // CHANGED productCode to product_code
-
+        const { product_code, type, startDate, endDate, limit = 10, currentPage = 1 } = params;
+    
         try {
-            const idb = await window.indexedDBManager.initDB(); // Renamed 'db' to 'idb' to avoid confusion with supabase client
+            const idb = await window.indexedDBManager.initDB();
             const transactionStoreName = window.indexedDBManager.STORE_NAMES.TRANSACTIONS;
-
-            // Check if IndexedDB has been populated. If not, fetch from Supabase.
-            // This logic might need adjustment based on how often full sync is desired.
-            // For now, assume if empty, fetch all and cache.
+    
             const countInIDB = await window.indexedDBManager.countItems(transactionStoreName);
             if (countInIDB === 0) {
                 console.log("Transactions store in IndexedDB is empty, fetching from Supabase...");
                 if (!window.supabaseClient) throw new Error("Supabase client is not available.");
-
+    
                 const { data: supabaseTransactions, error: fetchError } = await window.supabaseClient
                     .from('transactions')
                     .select('*')
-                    .order('transaction_date', { ascending: false }); // Match Firestore's orderBy
-
+                    .order('transaction_date', { ascending: false });
+    
                 if (fetchError) {
                     console.error("Error fetching transactions from Supabase:", fetchError);
                     throw fetchError;
                 }
-
+    
+                // MAP DATABASE FIELDS TO FRONTEND EXPECTED FIELDS
                 const itemsToCache = supabaseTransactions.map(tx => ({
                     ...tx,
-                    // Ensure field name consistency if IndexedDB expects specific names, e.g., product_code, transactionDate // CHANGED
-                    product_code: tx.product_code, // CHANGED key
-                    transactionDate: tx.transaction_date
+                    // Map snake_case database fields to camelCase frontend fields
+                    product_code: tx.product_code,
+                    transactionDate: tx.transaction_date,
+                    operatorId: tx.operator_id,        // ADD THIS MAPPING
+                    warehouseId: tx.warehouse_id,      // ADD THIS MAPPING
+                    productName: tx.product_name,      // ADD THIS MAPPING
+                    batchNo: tx.batch_no               // ADD THIS MAPPING
                 }));
-
+    
                 if (itemsToCache.length > 0) {
                     await window.indexedDBManager.bulkPutItems(transactionStoreName, itemsToCache);
                     console.log(`Cached ${itemsToCache.length} transactions from Supabase to IndexedDB.`);
@@ -46,113 +48,124 @@ const transactionAPI_module = {
             }
 
             const tx = idb.transaction(transactionStoreName, 'readonly');
-            const store = tx.objectStore(transactionStoreName);
-            // Assuming 'transactionDate' is the correct index name in IndexedDB.
-            // Schema uses 'transaction_date', ensure it's mapped correctly when caching.
-            const index = store.index('transactionDate');
+        const store = tx.objectStore(transactionStoreName);
+        const index = store.index('transactionDate');
 
+        let range = null;
+        if (startDate && endDate) {
+            range = IDBKeyRange.bound(new Date(startDate).toISOString(), new Date(endDate).toISOString());
+        } else if (startDate) {
+            range = IDBKeyRange.lowerBound(new Date(startDate).toISOString());
+        } else if (endDate) {
+            range = IDBKeyRange.upperBound(new Date(endDate).toISOString());
+        }
 
-            let range = null;
-            if (startDate && endDate) {
-                range = IDBKeyRange.bound(new Date(startDate).toISOString(), new Date(endDate).toISOString());
-            } else if (startDate) {
-                range = IDBKeyRange.lowerBound(new Date(startDate).toISOString());
-            } else if (endDate) {
-                range = IDBKeyRange.upperBound(new Date(endDate).toISOString());
-            }
-            console.log('[transactionAPI.getTransactions] Using range for IndexedDB query:', range);
+        const results = [];
+        let totalItems = 0;
+        const offset = (currentPage - 1) * limit;
+        let cursorAdvancement = offset;
+        let hasMoreDataForNextPage = false;
 
-            const results = [];
-            let totalItems = 0;
-            const offset = (currentPage - 1) * limit;
-            let cursorAdvancement = offset;
-            let hasMoreDataForNextPage = false;
-
-            await new Promise((resolveCount, rejectCount) => {
-                const countCursorRequest = index.openCursor(range, 'prev');
-                countCursorRequest.onsuccess = event => {
-                    const cursor = event.target.result;
-                    if (cursor) {
-                        const item = cursor.value; // item from IDB, will have product_code
-                        let match = true;
-                        if (product_code && item.product_code !== product_code) match = false; // CHANGED
-                        if (type && item.type !== type) match = false;
-                        // Note: productId filter is handled by Supabase query if provided, or not applied if only IDB
-                        if (match) {
-                            totalItems++;
-                        }
-                        cursor.continue();
-                    } else {
-                        resolveCount();
+        // Count cursor - same as before
+        await new Promise((resolveCount, rejectCount) => {
+            const countCursorRequest = index.openCursor(range, 'prev');
+            countCursorRequest.onsuccess = event => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    const item = cursor.value;
+                    let match = true;
+                    if (product_code && item.product_code !== product_code) match = false;
+                    if (type && item.type !== type) match = false;
+                    if (match) {
+                        totalItems++;
                     }
-                };
-                countCursorRequest.onerror = event => rejectCount(event.target.error);
-            });
-
-            await new Promise((resolveCursor, rejectCursor) => {
-                const cursorRequest = index.openCursor(range, 'prev');
-                cursorRequest.onsuccess = event => {
-                    const cursor = event.target.result;
-                    if (cursor) {
-                        const item = cursor.value; // item from IDB, will have product_code
-                        let match = true;
-                        if (product_code && item.product_code !== product_code) match = false; // CHANGED
-                        if (type && item.type !== type) match = false;
-                        // Note: productId filter logic
-                        if (match) {
-                            if (cursorAdvancement > 0) {
-                                cursorAdvancement--;
-                            } else if (results.length < limit) {
-                                results.push(item);
-                            } else {
-                                hasMoreDataForNextPage = true;
-                                resolveCursor();
-                                return;
-                            }
-                        }
-                        cursor.continue();
-                    } else {
-                        resolveCursor();
-                    }
-                };
-                cursorRequest.onerror = event => rejectCursor(event.target.error);
-            });
-
-            console.log('[transactionAPI.getTransactions] Returning results:', JSON.parse(JSON.stringify(results)), 'Total items matching filters:', totalItems);
-            return {
-                data: results,
-                pagination: {
-                    currentPage: currentPage,
-                    itemsPerPage: limit,
-                    totalItems: totalItems,
-                    totalPages: Math.ceil(totalItems / limit),
-                    hasNextPage: hasMoreDataForNextPage,
-                    lastVisibleDocId: null // This was Firestore specific, may not apply to Supabase pagination directly
+                    cursor.continue();
+                } else {
+                    resolveCount();
                 }
             };
+            countCursorRequest.onerror = event => rejectCount(event.target.error);
+        });
 
-        } catch (error) {
-            console.error("Error in transactionAPI.getTransactions (IndexedDB/Supabase):", error);
-            return { data: [], pagination: { currentPage: currentPage, itemsPerPage: limit, totalItems: 0, totalPages: 0, hasNextPage: false, lastVisibleDocId: null } };
-        }
-    },
+        // Data cursor - same as before
+        await new Promise((resolveCursor, rejectCursor) => {
+            const cursorRequest = index.openCursor(range, 'prev');
+            cursorRequest.onsuccess = event => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    const item = cursor.value;
+                    let match = true;
+                    if (product_code && item.product_code !== product_code) match = false;
+                    if (type && item.type !== type) match = false;
+                    if (match) {
+                        if (cursorAdvancement > 0) {
+                            cursorAdvancement--;
+                        } else if (results.length < limit) {
+                            results.push(item);
+                        } else {
+                            hasMoreDataForNextPage = true;
+                            resolveCursor();
+                            return;
+                        }
+                    }
+                    cursor.continue();
+                } else {
+                    resolveCursor();
+                }
+            };
+            cursorRequest.onerror = event => rejectCursor(event.target.error);
+        });
+
+        console.log('[transactionAPI.getTransactions] Returning results:', JSON.parse(JSON.stringify(results)), 'Total items matching filters:', totalItems);
+        return {
+            data: results,
+            pagination: {
+                currentPage: currentPage,
+                itemsPerPage: limit,
+                totalItems: totalItems,
+                totalPages: Math.ceil(totalItems / limit),
+                hasNextPage: hasMoreDataForNextPage,
+                lastVisibleDocId: null
+            }
+        };
+
+    } catch (error) {
+        console.error("Error in transactionAPI.getTransactions (IndexedDB/Supabase):", error);
+        return { 
+            data: [], 
+            pagination: { 
+                currentPage: currentPage, 
+                itemsPerPage: limit, 
+                totalItems: 0, 
+                totalPages: 0, 
+                hasNextPage: false, 
+                lastVisibleDocId: null 
+            } 
+        };
+    }
+},
 
     async inboundStock(data) {
         await ensureDbManager();
+        const effectiveProductCode = data.product_code || data.productCode;
+
+        // Safeguard for product_code (checking effectiveProductCode)
+        if (!effectiveProductCode) {
+            const errorMsg = "[transactionAPI.inboundStock] Error: product_code (or productCode) is missing from data.";
+            console.error(errorMsg, data); // Log the original data object
+            throw new Error("product_code (or productCode) is required for inboundStock transaction.");
+        }
         const quantity = Number(data.quantity);
         // Map to Supabase column names
         const transactionPayload = {
             type: "inbound",
-            // product_id: data.productId, // Schema uses product_id - assuming this is a distinct identifier - REMOVED
-            product_code: data.product_code, // data now provides product_code, this is the correct field
+            product_code: effectiveProductCode, // Use the resolved product code
             product_name: data.productName,
             warehouse_id: data.warehouseId,
-            batch_no: data.batchNo || null, // This is operationReferenceBatchNo in internal transfers
-            // product_batch_no: data.actualProductBatchNo, // if it's a separate field
+            batch_no: data.batchNo || null, 
             quantity: quantity,
             operator_id: data.operatorId,
             description: data.description || `Stock in to ${data.warehouseId}.`,
-            // transaction_date will be set by Supabase (DEFAULT NOW()) or here for offline
         };
 
         if (navigator.onLine && window.supabaseClient) {
@@ -160,6 +173,7 @@ const transactionAPI_module = {
             // Supabase doesn't have a direct equivalent of FieldValue.serverTimestamp() for client-side optimistic updates
             // before insert. Best to let the DB handle it or use new Date().toISOString().
             // If an ID is needed before insert, generate a UUID client-side.
+            console.log("[transactionAPI.inboundStock] Attempting Supabase insert. Effective product_code:", transactionPayload.product_code, "Full payload:", transactionPayload);
             const { data: insertedTx, error } = await window.supabaseClient
                 .from('transactions')
                 .insert({ ...transactionPayload, transaction_date: new Date().toISOString() })
@@ -167,7 +181,7 @@ const transactionAPI_module = {
                 .single(); // Assuming you want the inserted row back
 
             if (error) {
-                console.error("Error sending inbound transaction to Supabase:", error);
+                console.error("Error sending inbound transaction to Supabase:", error, "Payload was:", transactionPayload); // Added payload to error log
                 throw error; // Or handle more gracefully
             }
             console.log("Inbound transaction sent to Supabase:", insertedTx.id);
@@ -209,11 +223,18 @@ const transactionAPI_module = {
 
     async outboundStock(data) {
         await ensureDbManager();
+        const effectiveProductCode = data.product_code || data.productCode;
+
+        // Safeguard for product_code (checking effectiveProductCode)
+        if (!effectiveProductCode) {
+            const errorMsg = "[transactionAPI.outboundStock] Error: product_code (or productCode) is missing from data.";
+            console.error(errorMsg, data); // Log the original data object
+            throw new Error("product_code (or productCode) is required for outboundStock transaction.");
+        }
         const quantity = Number(data.quantity);
         const transactionPayload = {
             type: "outbound",
-            // product_id: data.productId, // Assuming distinct identifier - REMOVED
-            product_code: data.product_code, // data now provides product_code, this is the correct field
+            product_code: effectiveProductCode, // Use the resolved product code
             product_name: data.productName,
             warehouse_id: data.warehouseId,
             batch_no: data.batchNo || null,
@@ -223,6 +244,7 @@ const transactionAPI_module = {
         };
 
         if (navigator.onLine && window.supabaseClient) {
+            console.log("[transactionAPI.outboundStock] Attempting Supabase insert. Effective product_code:", transactionPayload.product_code, "Full payload:", transactionPayload);
             const { data: insertedTx, error } = await window.supabaseClient
                 .from('transactions')
                 .insert({ ...transactionPayload, transaction_date: new Date().toISOString() })
@@ -230,7 +252,7 @@ const transactionAPI_module = {
                 .single();
 
             if (error) {
-                console.error("Error sending outbound transaction to Supabase:", error);
+                console.error("Error sending outbound transaction to Supabase:", error, "Payload was:", transactionPayload); // Added payload to error log
                 throw error;
             }
             console.log("Outbound transaction sent to Supabase:", insertedTx.id);
@@ -308,6 +330,13 @@ const transactionAPI_module = {
                 throw new Error(`Inventory item with ID ${data.inventoryId} not found or fetch error.`);
             }
 
+            // Safeguard for product_code from the fetched inventory item
+            if (!inventoryItem.product_code) {
+                const errorMsg = `[transactionAPI.outboundStockByInventoryId] Error: product_code is missing from fetched inventory item (ID: ${data.inventoryId}).`;
+                console.error(errorMsg, inventoryItem);
+                throw new Error(errorMsg);
+            }
+
             const currentQuantity = inventoryItem.quantity;
             const quantityToDecrement = Number(data.quantityToDecrement);
             if (isNaN(quantityToDecrement) || quantityToDecrement < 0) throw new Error("Quantity to decrement must be a non-negative number.");
@@ -340,13 +369,17 @@ const transactionAPI_module = {
                 // pallets_decremented field removed as per user request
             };
 
+            console.log("[transactionAPI.outboundStockByInventoryId] LogPayload product_code for Supabase insert:", logPayload.product_code, "Full LogPayload:", logPayload); // Added logging
             const { data: newTransaction, error: txError } = await window.supabaseClient
                 .from('transactions')
                 .insert(logPayload)
                 .select()
                 .single();
 
-            if (txError) throw txError;
+            if (txError) {
+                console.error("Error sending outboundStockByInventoryId transaction to Supabase:", txError, "Payload was:", logPayload); // Added payload to error log
+                throw txError;
+            }
 
             // 3. Update the inventory item
             const newQuantity = currentQuantity - quantityToDecrement;
@@ -490,30 +523,38 @@ const transactionAPI_module = {
         console.log("[performInternalTransfer] Initiated with data (Supabase):", JSON.parse(JSON.stringify(transferData)));
         await ensureDbManager();
         const {
-            productId, product_code, productName, // CHANGED productCode to product_code
+            // productId, // Not directly used in transaction payload if product_code is primary
+            productName,
             sourceWarehouseId, destinationWarehouseId,
-            quantity, operatorId, batchNo, // This is product's batchNo
-            sourceBatchDocId // This is the ID of the inventory item (row) in 'inventory' table
+            quantity, operatorId, batchNo,
+            sourceBatchDocId
         } = transferData;
 
-        if (!product_code || !sourceWarehouseId || !destinationWarehouseId || !quantity || isNaN(Number(quantity))) { // CHANGED
+        // Resolve product_code, preferring snake_case but falling back to camelCase from input
+        const effectiveProductCode = transferData.product_code || transferData.productCode;
+
+        // Safeguard for effectiveProductCode
+        if (!effectiveProductCode) {
+            const errorMsg = "[transactionAPI.performInternalTransfer] Error: product_code (or productCode) is missing from transferData.";
+            console.error(errorMsg, transferData); // Log original transferData
+            throw new Error("product_code (or productCode) is required for performInternalTransfer transaction.");
+        }
+
+        if (!sourceWarehouseId || !destinationWarehouseId || !quantity || isNaN(Number(quantity))) {
             console.error("[performInternalTransfer] Invalid transferData (Supabase):", JSON.parse(JSON.stringify(transferData)));
             throw new Error("Invalid data for internal transfer. Missing required fields or invalid quantity.");
         }
 
         const numericQuantity = Number(quantity);
-        const operationReferenceBatchNo = `TRANSFER-${sourceWarehouseId}-TO-${destinationWarehouseId}`;
+        // const operationReferenceBatchNo = `TRANSFER-${sourceWarehouseId}-TO-${destinationWarehouseId}`; // This seems to have been for a different batch_no usage
 
         // Map to Supabase column names
         const commonTxPayload = {
-            // product_id: productId || null, // Assuming productId is distinct - REPLACED with product_code below
-            product_code: product_code, // This is the correct field for the transactions table
+            product_code: effectiveProductCode, // Use resolved product code
             product_name: productName,
             quantity: numericQuantity,
             operator_id: operatorId,
-            // product_batch_no: batchNo, // Actual product batch number - REPLACED KEY
-            batch_no: batchNo, // Actual product batch number - USING batch_no FOR PRODUCT'S BATCH
-            // batch_no: operationReferenceBatchNo, // Transfer operation reference - POTENTIAL CONFLICT / REDUNDANCY
+            batch_no: batchNo, // This should be the actual product's batch number
         };
 
         const outboundTxPayload = {
@@ -537,7 +578,7 @@ const transactionAPI_module = {
             try {
                 // 1. Create outbound transaction
                 const finalOutboundPayload = { ...outboundTxPayload, transaction_date: new Date().toISOString() };
-                console.log("[performInternalTransfer] Attempting to insert OUTBOUND transaction with payload:", JSON.parse(JSON.stringify(finalOutboundPayload)));
+                console.log("[performInternalTransfer] Attempting to insert OUTBOUND transaction with payload product_code:", finalOutboundPayload.product_code, "Full payload:", JSON.parse(JSON.stringify(finalOutboundPayload))); // Added logging
                 const { data: outTx, error: outError } = await window.supabaseClient
                     .from('transactions')
                     .insert(finalOutboundPayload)
@@ -545,14 +586,14 @@ const transactionAPI_module = {
                     .single();
 
                 if (outError) {
-                    console.error("[performInternalTransfer] CRITICAL ERROR during OUTBOUND Supabase transaction:", JSON.parse(JSON.stringify(outError)));
+                    console.error("[performInternalTransfer] CRITICAL ERROR during OUTBOUND Supabase transaction:", JSON.parse(JSON.stringify(outError)), "Payload was:", finalOutboundPayload); // Added payload to error
                     throw outError;
                 }
                 console.log(`[performInternalTransfer] Staged OUTBOUND tx (ID: ${outTx.id}) to Supabase. Response:`, JSON.parse(JSON.stringify(outTx)));
 
                 // 2. Create inbound transaction
                 const finalInboundPayload = { ...inboundTxPayload, transaction_date: new Date().toISOString() };
-                console.log("[performInternalTransfer] Attempting to insert INBOUND transaction with payload:", JSON.parse(JSON.stringify(finalInboundPayload)));
+                console.log("[performInternalTransfer] Attempting to insert INBOUND transaction with payload product_code:", finalInboundPayload.product_code, "Full payload:", JSON.parse(JSON.stringify(finalInboundPayload))); // Added logging
                 const { data: inTx, error: inError } = await window.supabaseClient
                     .from('transactions')
                     .insert(finalInboundPayload)
@@ -560,7 +601,7 @@ const transactionAPI_module = {
                     .single();
 
                 if (inError) {
-                    console.error("[performInternalTransfer] CRITICAL ERROR during INBOUND Supabase transaction:", JSON.parse(JSON.stringify(inError)));
+                    console.error("[performInternalTransfer] CRITICAL ERROR during INBOUND Supabase transaction:", JSON.parse(JSON.stringify(inError)), "Payload was:", finalInboundPayload); // Added payload to error
                     // TODO: Handle rollback of outTx if this fails
                     throw inError; 
                 }
