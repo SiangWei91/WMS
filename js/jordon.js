@@ -2049,6 +2049,7 @@ async function handleSubmitAllStockOut() {
         for (let i = 0; i < processedItemsArray.length; i++) {
             const item = processedItemsArray[i]; 
             let outboundSuccess = false;
+            let inboundSuccess = false; // Declare inboundSuccess here
 
             try {
                 // 1. Outbound from Jordon
