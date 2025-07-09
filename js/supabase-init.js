@@ -11,9 +11,28 @@ let supabaseClient = null;
 try {
     // The Supabase client is usually available globally via the CDN script as `supabase.createClient`
     if (window.supabase && typeof window.supabase.createClient === 'function') {
-        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const customFetch = (input, init = {}) => {
+            const token = sessionStorage.getItem('supabaseToken');
+            init.headers = { ...init.headers }; // Ensure headers object exists
+
+            // Add the custom Firebase token header if token exists
+            if (token) {
+                init.headers['X-Firebase-Token'] = token; // No "Bearer " prefix
+            }
+
+            // Always add the apikey header
+            init.headers['apikey'] = SUPABASE_ANON_KEY;
+            
+            return fetch(input, init);
+        };
+
+        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            global: {
+                fetch: customFetch,
+            },
+        });
         window.supabaseClient = supabaseClient; // Expose the client globally
-        console.log('Supabase client initialized successfully.');
+        console.log('Supabase client initialized successfully with custom fetch for Authorization header.');
     } else {
         console.error('Supabase client library (supabase.createClient) not found. Ensure it is loaded correctly.');
     }
