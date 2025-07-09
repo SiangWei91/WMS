@@ -791,50 +791,72 @@ async function fetchProductDetailsByCodes(productCodes) { // Removed db paramete
 
 async function loadPendingJordonStock() {
     const stockInTableBody = document.getElementById('stock-in-table-body');
-    try {
-        const db = firebase.firestore();
-        const inventoryRef = db.collection('inventory');
-        const q = inventoryRef
-            .where('warehouseId', '==', 'jordon')
-            .where('_3plDetails.status', '==', 'pending');
-        const pendingInventorySnapshot = await q.get();
+    if (!window.supabaseClient) {
+        console.error("Supabase client not initialized.");
+        if (stockInTableBody) {
+            stockInTableBody.innerHTML = '<tr><td colspan="12" style="text-align:center; color:red;">Error: Supabase client not available.</td></tr>';
+        }
+        return [];
+    }
 
-        if (pendingInventorySnapshot.empty) {
-            console.log("No pending Jordon stock found.");
+    try {
+        const { data: inventoryItems, error } = await window.supabaseClient
+            .from('inventory')
+            .select('*')
+            .eq('warehouse_id', 'jordon')
+            .eq('_3pl_details->>status', 'pending'); // Query JSONB status, CORRECTED COLUMN NAME
+
+        if (error) {
+            console.error("Error loading pending Jordon stock from Supabase:", error);
+            throw error;
+        }
+
+        if (!inventoryItems || inventoryItems.length === 0) {
+            console.log("No pending Jordon stock found in Supabase.");
             return [];
         }
 
-        const inventoryItems = pendingInventorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Map Supabase data (snake_case to camelCase if needed by subsequent functions)
+        // For now, assuming downstream functions can handle original Supabase column names or _3pl_details structure.
+        // id, productCode, _3pl_details, batchNo, container, quantity, excelRowNumber are expected.
+        // Supabase returns columns as they are in the DB. If they are product_code, we need to map.
+        // Assuming productCode, batchNo, container, quantity, excelRowNumber are direct column names.
+        const mappedInventoryItems = inventoryItems.map(item => ({
+            id: item.id, // Assuming 'id' is the primary key
+            productCode: item.product_code, // Assuming 'product_code' from Supabase
+            _3plDetails: item._3pl_details, // CORRECTED COLUMN NAME, mapped to _3plDetails for JS consistency
+            batchNo: item.batch_no, // Assuming 'batch_no'
+            container: item.container, // Assuming 'container'
+            quantity: item.quantity,
+            excelRowNumber: item.excel_row_number, // Assuming 'excel_row_number'
+            warehouseId: item.warehouse_id // Keep for consistency if needed elsewhere
+        }));
         
-        // Collect all unique product codes from inventory items
-        const originalJordonCodes = inventoryItems
+        const originalJordonCodes = mappedInventoryItems
             .map(item => item.productCode)
-            .filter(code => code); // Filter out undefined/empty codes
+            .filter(code => code);
 
-        // Create an expanded set of codes to fetch from the 'products' collection
         const codesToActuallyFetch = new Set();
         originalJordonCodes.forEach(code => {
-            codesToActuallyFetch.add(code); // Add original code
+            codesToActuallyFetch.add(code);
             if (code.endsWith('.1')) {
-                codesToActuallyFetch.add(code.slice(0, -2)); // Add trimmed version if original ends with .1
+                codesToActuallyFetch.add(code.slice(0, -2));
             } else {
-                codesToActuallyFetch.add(code + '.1'); // Add suffixed version if original does not end with .1
+                codesToActuallyFetch.add(code + '.1');
             }
         });
         const productCodesForDbQuery = Array.from(codesToActuallyFetch);
 
-        // Fetch product details for all potential variations
         const productDetailsMap = await fetchProductDetailsByCodes(productCodesForDbQuery);
 
-        const pendingItemsWithProducts = inventoryItems.map(inventoryItem => {
+        const pendingItemsWithProducts = mappedInventoryItems.map(inventoryItem => {
             let productName = 'N/A';
             let productPackaging = 'N/A';
-
             let details;
+
             if (inventoryItem.productCode) {
-                details = productDetailsMap.get(inventoryItem.productCode); // Primary lookup
+                details = productDetailsMap.get(inventoryItem.productCode);
                 if (!details) {
-                    // Symmetrical Fallback logic
                     if (inventoryItem.productCode.endsWith('.1')) {
                         const trimmedCode = inventoryItem.productCode.slice(0, -2);
                         details = productDetailsMap.get(trimmedCode);
@@ -866,14 +888,15 @@ async function loadPendingJordonStock() {
             return rowNumA - rowNumB;
         });
 
-        console.log('Loaded and sorted pending Jordon stock with product details:', pendingItemsWithProducts);
+        console.log('Loaded and sorted pending Jordon stock with product details from Supabase:', pendingItemsWithProducts);
         return pendingItemsWithProducts;
+
     } catch (error) {
-        console.error("Error loading pending Jordon stock:", error);
-        if (stockInTableBody) { // Display error in the table
-            stockInTableBody.innerHTML = '<tr><td colspan="12" style="text-align:center; color:red;">Error loading pending stock. Please try again.</td></tr>';
+        console.error("Error processing pending Jordon stock from Supabase:", error.message);
+        if (stockInTableBody) {
+            stockInTableBody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:red;">Error loading pending stock: ${error.message}. Please try again.</td></tr>`;
         }
-        return []; 
+        return [];
     }
 }
 
@@ -916,7 +939,24 @@ function displayPendingStockInTable(items) {
 
         newRow.insertCell().innerHTML = `<input type="text" class="form-control form-control-sm lot-number-input" value="${escapeHtml(threePlDetails.lotNumber || '')}" placeholder="Enter Lot No.">`;
         newRow.insertCell().textContent = item.batchNo || '';
-        newRow.insertCell().textContent = (threePlDetails && threePlDetails.dateStored) ? threePlDetails.dateStored : '';
+        
+        // Format and display Date Stored
+        const dateStoredCell = newRow.insertCell();
+        if (threePlDetails && threePlDetails.dateStored) {
+            try {
+                const dateObj = new Date(threePlDetails.dateStored);
+                const day = String(dateObj.getUTCDate()).padStart(2, '0');
+                const month = String(dateObj.getUTCMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+                const year = dateObj.getUTCFullYear();
+                dateStoredCell.textContent = `${day}/${month}/${year}`;
+            } catch (e) {
+                console.warn("Error formatting dateStored in displayPendingStockInTable:", threePlDetails.dateStored, e);
+                dateStoredCell.textContent = threePlDetails.dateStored; // Fallback to original string
+            }
+        } else {
+            dateStoredCell.textContent = '';
+        }
+
         newRow.insertCell().textContent = item.container || '';
         newRow.insertCell().textContent = item.quantity !== undefined ? item.quantity : 0;
         newRow.insertCell().textContent = (threePlDetails && threePlDetails.pallet !== undefined) ? threePlDetails.pallet : '';
@@ -928,56 +968,75 @@ async function loadInventorySummaryData() {
     console.log("loadInventorySummaryData() called");
     const summaryTableBody = document.getElementById('jordon-inventory-summary-tbody');
     if (summaryTableBody) {
-        summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Loading Jordon inventory summary...</td></tr>';
+        summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">Loading Jordon inventory summary from Supabase...</td></tr>';
     }
 
-    const db = firebase.firestore();
-    try {
-        const inventoryQuery = db.collection('inventory')
-            .where('warehouseId', '==', 'jordon')
-            .orderBy('_3plDetails.dateStored')
-            .orderBy('_3plDetails.lotNumber');
-        const snapshot = await inventoryQuery.get();
+    if (!window.supabaseClient) {
+        console.error("Supabase client not initialized for Inventory Summary.");
+        if (summaryTableBody) {
+            summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:red;">Error: Supabase client not available.</td></tr>';
+        }
+        currentInventorySummaryItems = [];
+        return [];
+    }
 
-        if (snapshot.empty) {
-            console.log("No Jordon inventory items found.");
+    try {
+        const { data: inventoryItems, error } = await window.supabaseClient
+            .from('inventory')
+            .select('*')
+            .eq('warehouse_id', 'jordon')
+            .order('_3pl_details->>dateStored', { ascending: true }) // CORRECTED COLUMN NAME
+            .order('_3pl_details->>lotNumber', { ascending: true }); // CORRECTED COLUMN NAME
+
+        if (error) {
+            console.error("Error loading Jordon inventory summary from Supabase:", error);
+            throw error;
+        }
+
+        if (!inventoryItems || inventoryItems.length === 0) {
+            console.log("No Jordon inventory items found in Supabase for summary.");
             if (summaryTableBody) summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">No inventory items found for Jordon.</td></tr>';
             currentInventorySummaryItems = [];
             return [];
         }
 
-        const inventoryItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Map Supabase data (snake_case to camelCase if needed by subsequent functions)
+        const mappedInventoryItems = inventoryItems.map(item => ({
+            id: item.id,
+            productCode: item.product_code, // Assuming 'product_code'
+            _3plDetails: item._3pl_details, // CORRECTED COLUMN NAME, mapped to _3plDetails for JS consistency
+            batchNo: item.batch_no, // Assuming 'batch_no'
+            container: item.container,
+            quantity: item.quantity,
+            // warehouseId: item.warehouse_id // Not strictly needed by displayInventorySummary but good for consistency
+        }));
 
-        // Collect all unique product codes from inventory items
-        const originalJordonCodes = inventoryItems
+        const originalJordonCodes = mappedInventoryItems
             .map(item => item.productCode)
-            .filter(code => code); // Filter out undefined/empty codes
+            .filter(code => code);
         
-        // Create an expanded set of codes to fetch from the 'products' collection
         const codesToActuallyFetch = new Set();
         originalJordonCodes.forEach(code => {
-            codesToActuallyFetch.add(code); // Add original code
+            codesToActuallyFetch.add(code);
             if (code.endsWith('.1')) {
-                codesToActuallyFetch.add(code.slice(0, -2)); // Add trimmed version if original ends with .1
+                codesToActuallyFetch.add(code.slice(0, -2));
             } else {
-                codesToActuallyFetch.add(code + '.1'); // Add suffixed version if original does not end with .1
+                codesToActuallyFetch.add(code + '.1');
             }
         });
         const productCodesForDbQuery = Array.from(codesToActuallyFetch);
 
-        // Fetch product details for all potential variations
         const productDetailsMap = await fetchProductDetailsByCodes(productCodesForDbQuery);
 
-        const summaryItems = inventoryItems.map(inventoryItem => {
+        const summaryItems = mappedInventoryItems.map(inventoryItem => {
             let productName = 'N/A';
             let productPackaging = 'N/A';
             let productId = null; 
             let details;
 
             if (inventoryItem.productCode) {
-                details = productDetailsMap.get(inventoryItem.productCode); // Primary lookup
+                details = productDetailsMap.get(inventoryItem.productCode);
                 if (!details) {
-                    // Symmetrical Fallback logic
                     if (inventoryItem.productCode.endsWith('.1')) {
                         const trimmedCode = inventoryItem.productCode.slice(0, -2);
                         details = productDetailsMap.get(trimmedCode);
@@ -993,25 +1052,32 @@ async function loadInventorySummaryData() {
             if (details) {
                 productName = details.name;
                 productPackaging = details.packaging;
-                productId = details.productId; // Assuming fetchProductDetailsByCodes could provide this
+                productId = details.productId; 
             } else if (inventoryItem.productCode) {
                 console.warn(`Product details not found for ${inventoryItem.productCode} (after all fallbacks) in Jordon summary`);
             } else {
                 console.warn(`Inventory item ${inventoryItem.id} missing productCode during summary load.`);
             }
-            return { ...inventoryItem, productName, productPackaging, productId };
+            // Ensure all fields expected by displayInventorySummary are present
+            // displayInventorySummary expects: id, productCode, productName, productPackaging, _3plDetails, batchNo, container, quantity, productId
+            return { 
+                ...inventoryItem, // Contains id, productCode, _3plDetails, batchNo, container, quantity
+                productName, 
+                productPackaging, 
+                productId 
+            };
         });
         
-        console.log('Loaded Jordon inventory summary data:', summaryItems);
-        currentInventorySummaryItems = summaryItems;
+        console.log('Loaded Jordon inventory summary data from Supabase:', summaryItems);
+        currentInventorySummaryItems = summaryItems; // Update global cache
         return summaryItems;
 
     } catch (error) {
-        console.error("Error loading Jordon inventory summary data:", error);
+        console.error("Error processing Jordon inventory summary from Supabase:", error.message);
         if (summaryTableBody) {
-            summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:red;">Error loading inventory summary. Please check connection or try again later.</td></tr>';
+            summaryTableBody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:red;">Error loading inventory summary: ${error.message}. Please check connection or try again later.</td></tr>`;
         }
-        currentInventorySummaryItems = []; // Clear on error
+        currentInventorySummaryItems = [];
         return [];
     }
 }
@@ -1085,7 +1151,24 @@ function displayInventorySummary(summaryItems) {
         row.insertCell().textContent = threePlDetails.location || '';
         row.insertCell().textContent = threePlDetails.lotNumber || '';
         row.insertCell().textContent = item.batchNo || '';
-        row.insertCell().textContent = threePlDetails.dateStored || '';
+        
+        // Format and display Date Stored
+        const dateStoredCell = row.insertCell();
+        if (threePlDetails && threePlDetails.dateStored) {
+            try {
+                const dateObj = new Date(threePlDetails.dateStored);
+                const day = String(dateObj.getUTCDate()).padStart(2, '0');
+                const month = String(dateObj.getUTCMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+                const year = dateObj.getUTCFullYear();
+                dateStoredCell.textContent = `${day}/${month}/${year}`;
+            } catch (e) {
+                console.warn("Error formatting dateStored in displayInventorySummary:", threePlDetails.dateStored, e);
+                dateStoredCell.textContent = threePlDetails.dateStored; // Fallback to original string
+            }
+        } else {
+            dateStoredCell.textContent = '';
+        }
+
         row.insertCell().textContent = item.container || '';
         
         const itemQuantity = Number(item.quantity) || 0;
@@ -1680,12 +1763,18 @@ async function handleSubmitStockIn() {
         return;
     }
 
+    if (!window.supabaseClient) {
+        console.error("Supabase client not initialized for handleSubmitStockIn.");
+        alert("Error: Supabase client not available. Cannot submit stock in.");
+        return;
+    }
+
     const rows = stockInTableBody.querySelectorAll('tr');
     const itemsToUpdate = [];
 
     rows.forEach(row => {
         const itemId = row.dataset.itemId;
-        if (!itemId) { 
+        if (!itemId) {
             return;
         }
 
@@ -1694,12 +1783,25 @@ async function handleSubmitStockIn() {
         const lotNumberInput = row.querySelector('.lot-number-input');
         const mixedPalletGroupIdInput = row.querySelector('.mixed-pallet-group-id-input');
 
+        // Find the original item from currentInventorySummaryItems or loadPendingJordonStock's result
+        // to get the existing _3plDetails. This is crucial for Supabase JSONB updates.
+        // For simplicity, we'll assume loadPendingJordonStock was called and its results are available
+        // or we refetch the specific item if necessary.
+        // However, the current structure of displayPendingStockInTable doesn't store the full original item easily.
+        // A better approach would be to have access to the full item data used to populate the row.
+        // For now, we construct the new _3plDetails based on inputs.
+        // This means any other fields in _3plDetails not touched by this form will be overwritten if we just set it.
+        // A true partial update of JSONB requires fetching the existing JSONB value first.
+
         const rowData = {
-            itemId: itemId,
-            palletType: palletTypeSelect ? palletTypeSelect.value : null,
-            location: locationSelect ? locationSelect.value : null,
-            lotNumber: lotNumberInput ? lotNumberInput.value.trim() : "", 
-            mixedPalletGroupId: mixedPalletGroupIdInput ? mixedPalletGroupIdInput.value.trim() : "", 
+            itemId: itemId, // This should be the actual primary key value for the row in 'inventory' table
+            _3plDetailsUpdate: { // This will be merged with existing _3pl_details or form the new value
+                palletType: palletTypeSelect ? palletTypeSelect.value : null,
+                location: locationSelect ? locationSelect.value : null,
+                lotNumber: lotNumberInput ? lotNumberInput.value.trim() : "",
+                mixedPalletGroupId: mixedPalletGroupIdInput ? mixedPalletGroupIdInput.value.trim() : "",
+                status: 'Complete' // Set status to Complete
+            }
         };
         itemsToUpdate.push(rowData);
     });
@@ -1708,45 +1810,60 @@ async function handleSubmitStockIn() {
         alert('No items found in the table to submit.');
         return;
     }
-    
+
     const submitStockInButton = document.getElementById('submit-stock-in-btn');
     if (submitStockInButton) {
         submitStockInButton.disabled = true;
+        submitStockInButton.textContent = 'Submitting...';
     }
 
     try {
-        const db = firebase.firestore();
-        const batch = db.batch();
+        const updatePromises = itemsToUpdate.map(async (itemData) => {
+            // Fetch the current _3pl_details for the item
+            const { data: currentItem, error: fetchError } = await window.supabaseClient
+                .from('inventory')
+                .select('_3pl_details') // CORRECTED COLUMN NAME
+                .eq('id', itemData.itemId)
+                .single();
 
-        itemsToUpdate.forEach(itemData => {
-            const itemRef = db.collection('inventory').doc(itemData.itemId);
-            const updateData = {
-                '_3plDetails.palletType': itemData.palletType,
-                '_3plDetails.location': itemData.location,
-                '_3plDetails.lotNumber': itemData.lotNumber,
-                '_3plDetails.mixedPalletGroupId': itemData.mixedPalletGroupId,
-                '_3plDetails.status': 'Complete'
-            };
-            batch.update(itemRef, updateData);
+            if (fetchError) {
+                console.error(`Error fetching item ${itemData.itemId} for update:`, fetchError);
+                throw new Error(`Failed to fetch current details for item ID ${itemData.itemId}.`);
+            }
+
+            const existing3plDetails = currentItem._3pl_details || {}; // CORRECTED COLUMN NAME
+            const new3plDetails = { ...existing3plDetails, ...itemData._3plDetailsUpdate };
+
+            const { error } = await window.supabaseClient
+                .from('inventory')
+                .update({ _3pl_details: new3plDetails }) // CORRECTED COLUMN NAME
+                .eq('id', itemData.itemId); // Ensure 'id' is the correct primary key column name
+
+            if (error) {
+                console.error(`Error updating item ${itemData.itemId} in Supabase:`, error);
+                throw error; // This will be caught by the Promise.all catch block
+            }
+            return { itemId: itemData.itemId, success: true };
         });
 
-        await batch.commit();
-        alert('Stock In updated successfully!');
+        await Promise.all(updatePromises);
+
+        alert('Stock In updated successfully via Supabase!');
         console.log('Stock In updated successfully for items:', itemsToUpdate.map(item => item.itemId));
-        
-        if(stockInTableBody) stockInTableBody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Update successful. Refreshing...</td></tr>';
+
+        if (stockInTableBody) stockInTableBody.innerHTML = '<tr><td colspan="12" style="text-align:center;">Update successful. Refreshing...</td></tr>';
         loadPendingJordonStock().then(displayPendingStockInTable).catch(err => console.error("Error refreshing stock-in table:", err));
 
         console.log("Attempting to refresh inventory summary data post-stock-in update.");
-        // Ensure loading message for summary is handled by loadInventorySummaryData itself
         loadInventorySummaryData().then(displayInventorySummary).catch(err => console.error("Error refreshing summary table post-stock-in:", err));
 
     } catch (error) {
-        console.error('Error updating stock in:', error);
-        alert('Error updating stock in. Please try again.');
+        console.error('Error updating stock in via Supabase:', error.message);
+        alert(`Error updating stock in: ${error.message}. Please try again.`);
     } finally {
         if (submitStockInButton) {
             submitStockInButton.disabled = false;
+            submitStockInButton.textContent = 'Submit Stock In';
         }
     }
 }
