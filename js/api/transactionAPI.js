@@ -336,8 +336,8 @@ const transactionAPI_module = {
                 quantity: quantityToDecrement,
                 operator_id: data.operatorId,
                 transaction_date: new Date().toISOString(),
-                description: data.description || `Stock out for transfer. Inventory ID: ${data.inventoryId}`,
-                pallets_decremented: inventoryItem.warehouse_id === 'jordon' ? palletsToDecrementNum : null
+                description: data.description || `Stock out for transfer. Inventory ID: ${data.inventoryId}`
+                // pallets_decremented field removed as per user request
             };
 
             const { data: newTransaction, error: txError } = await window.supabaseClient
