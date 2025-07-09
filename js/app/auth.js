@@ -97,7 +97,34 @@ export function initAuth(mainContentArea, sidebar, sidebarToggle, pageLoaders, n
 
             sessionStorage.removeItem('isAuthenticated');
             sessionStorage.removeItem('loggedInUser');
+            sessionStorage.removeItem('isAuthenticated');
+            sessionStorage.removeItem('loggedInUser');
+            sessionStorage.removeItem('supabaseToken'); // Also clear supabase token on sign out
             window.location.href = 'login.html';
+        }
+    });
+
+    firebase.auth().onIdTokenChanged(async (user) => {
+        if (user) {
+            try {
+                const token = await user.getIdToken();
+                sessionStorage.setItem('supabaseToken', token);
+                console.log('onIdTokenChanged: Supabase token updated in sessionStorage.');
+            } catch (error) {
+                console.error('onIdTokenChanged: Error getting ID token:', error);
+                // If token refresh fails, it could lead to auth issues with Supabase.
+                // Consider redirecting to login or showing an error.
+                // For now, logging the error. If Supabase calls start failing with 401,
+                // this could be a reason.
+                // One option: display a persistent error message or force re-login.
+                // Example:
+                // if (typeof window.displayGlobalError === 'function') {
+                //     window.displayGlobalError('Your session may have expired. Please try refreshing or logging in again.');
+                // }
+            }
+        } else {
+            // User is signed out, token is already cleared by onAuthStateChanged
+            console.log('onIdTokenChanged: User is signed out.');
         }
     });
 }
