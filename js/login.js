@@ -79,13 +79,27 @@ document.addEventListener('DOMContentLoaded', function () {
                                     console.error('Login: Error getting ID token result:', error);
                                 }
                                 
-                                sessionStorage.setItem('isAuthenticated', 'true');
-                                sessionStorage.setItem('loggedInUser', displayName); // Use displayName
-                                
-                                unsubscribe(); 
+                                try {
+                                    const idToken = await user.getIdToken();
+                                    sessionStorage.setItem('supabaseToken', idToken);
+                                    console.log('Supabase token stored in sessionStorage.');
+
+                                    sessionStorage.setItem('isAuthenticated', 'true');
+                                    sessionStorage.setItem('loggedInUser', displayName); // Use displayName
+                                    
+                                    unsubscribe(); 
   
-                                console.log('Redirecting to index.html from onAuthStateChanged...');
-                                window.location.href = 'index.html';
+                                    console.log('Redirecting to index.html from onAuthStateChanged...');
+                                    window.location.href = 'index.html';
+
+                                } catch (idTokenError) {
+                                    console.error('Error getting ID token:', idTokenError);
+                                    displayError('Failed to retrieve user session token. Please try again.');
+                                    unsubscribe();
+                                    loginButton.disabled = false;
+                                    loginButton.textContent = 'Login';
+                                    return; // Stop further execution in this callback
+                                }
                             } else {
                                 console.error('onAuthStateChanged: User is null, login might have failed post-credential.');
                                 unsubscribe(); 
@@ -95,16 +109,21 @@ document.addEventListener('DOMContentLoaded', function () {
                             }
                         });
   
-                        setTimeout(() => {
+                        // Reduced timeout as getIdToken() should be relatively quick
+                        // and we want to catch failures faster if onAuthStateChanged doesn't proceed.
+                        const authStateTimeout = setTimeout(() => {
                             unsubscribe(); 
                             if (!sessionStorage.getItem('isAuthenticated')) {
-                                console.warn('onAuthStateChanged timeout. Login may have failed or listener did not fire.');
-                                // Consider if error display and button re-enable is needed here if not already handled.
-                                // If loginButton is not accessible here, this might be an issue.
-                                // However, the primary failure paths for onAuthStateChanged's `else` and signInWithCustomToken's `catch`
-                                // should cover most button reset scenarios.
+                                console.warn('onAuthStateChanged timeout or did not complete successfully. Login may have failed.');
+                                // Ensure error is displayed and button is re-enabled if not already handled by other error paths.
+                                if (loginButton && !loginButton.disabled) { // Check if loginButton is accessible and not already enabled
+                                    // This case might be redundant if other errors already cover it, but acts as a fallback.
+                                    // displayError('Login process timed out. Please try again.'); // Avoid double messaging if possible
+                                    // loginButton.disabled = false; 
+                                    // loginButton.textContent = 'Login';
+                                }
                             }
-                        }, 5000);
+                        }, 3000); // Reduced timeout to 3 seconds
   
                     } catch (authError) {
                         console.error('Firebase signInWithCustomToken error:', authError);
