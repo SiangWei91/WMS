@@ -1000,8 +1000,18 @@ async function loadInventorySummaryData() {
             return [];
         }
 
+        // Filter out items with quantity 0 or less
+        const validQuantityItems = inventoryItems.filter(item => item.quantity > 0);
+
+        if (!validQuantityItems || validQuantityItems.length === 0) {
+            console.log("No Jordon inventory items with quantity > 0 found in Supabase for summary.");
+            if (summaryTableBody) summaryTableBody.innerHTML = '<tr><td colspan="11" style="text-align:center;">No inventory items with quantity > 0 found for Jordon.</td></tr>';
+            currentInventorySummaryItems = [];
+            return [];
+        }
+
         // Map Supabase data (snake_case to camelCase if needed by subsequent functions)
-        const mappedInventoryItems = inventoryItems.map(item => ({
+        const mappedInventoryItems = validQuantityItems.map(item => ({
             id: item.id,
             productCode: item.product_code, // Assuming 'product_code'
             _3plDetails: item._3pl_details, // CORRECTED COLUMN NAME, mapped to _3plDetails for JS consistency
@@ -2004,7 +2014,8 @@ async function handleSubmitAllStockOut() {
         }
 
         // This operatorId should ideally come from an authentication system
-        const operatorId = firebase.auth().currentUser ? firebase.auth().currentUser.uid : "JORDON_WMS_USER_FALLBACK";
+        // const operatorId = firebase.auth().currentUser ? firebase.auth().currentUser.uid : "JORDON_WMS_USER_FALLBACK";
+        const operatorId = "custom_SW"; // Set operatorId to "custom_SW"
 
 
         const formDataForFirestore = {
