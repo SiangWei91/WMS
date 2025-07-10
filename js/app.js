@@ -6,9 +6,11 @@ import { loadInventory } from './inventory.js';
 import { loadTransactions } from './transactions.js';
 import { initializeShipmentFeature } from './shipment.js';
 // Main page loading functions from the new module
-import { loadPage, loadDashboard } from './app/pageLoader.js'; 
+import { loadPage, loadDashboard } from './app/pageLoader.js';
 // HTML Templates and navigation logic (initNavigation, createNavItem) are now in app/navigation.js
 // Debounce function is now in app/utils.js
+// CSV Import functionality
+import { initInitialCsvImport } from './app/initialCsvImport.js';
 // sidebarToggleListenerAttached is managed within app/auth.js
 // Firestore Listeners setup is now in app/firestoreListeners.js, called by auth.js
 
@@ -59,6 +61,9 @@ document.addEventListener('DOMContentLoaded', function () {
     //    - Redirecting to login page and cleaning up (detaching listeners etc.).
     initAuth(mainContentArea, sidebar, sidebarToggle, pageLoaders, navigationElements);
     
+    // Initialize CSV Import functionality
+    initInitialCsvImport();
+
     // Event listener for the logout button in the avatar dropdown
     // This remains in app.js as it's a direct user interaction tied to the main page structure.
     const dropdownLogoutButton = document.getElementById('dropdown-logout-button');
@@ -172,23 +177,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
-// Functions that were previously in app.js but are being moved:
-// - NAV_ITEM_... HTML constants -> to navigation.js
-// - sidebarToggleListenerAttached flag -> managed within auth.js
-// - debounce function -> to utils.js
-// - initNavigation function -> to navigation.js
-// - createNavItem function -> to navigation.js
-// - loadPage function and its specific page loaders (loadDashboard, loadInboundForm, etc.) -> to pageLoader.js
-// - Firestore listener setup (the block starting with `if (window.indexedDBManagerReady)`) -> to firestoreListeners.js
-// - The actual onAuthStateChanged listener block -> to auth.js
-// - Specific page loading logic like loadJordonPage, loadDashboard (the ones defining HTML) -> to pageLoader.js
-// - Form handlers like handleInboundSubmit, handleOutboundSubmit -> to pageLoader.js (or could be further modularized with their forms)
 
-// Note: The dynamic imports within the old loadPage function (e.g., import('./products.js')) 
-// will be handled by the new pageLoader.js module.
-// The direct imports of loadProducts, loadInventory etc. at the top of this file are
-// necessary if they are directly used by firestoreListeners.js for callbacks,
-// passed via auth.js.
 
 // Fallbacks for loadProducts, etc. are no longer needed here as modules handle their own loading.
 console.log("app.js: Main script loaded. Initialization delegated to imported modules.");
