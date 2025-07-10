@@ -22,6 +22,15 @@ try {
 
             // Always add the apikey header
             init.headers['apikey'] = SUPABASE_ANON_KEY;
+
+            // Ensure Content-Type is application/json for POST, PATCH, PUT requests if a body exists
+            // and Content-Type is not already set (e.g., for FormData).
+            const method = (init.method || 'GET').toUpperCase();
+            if (['POST', 'PATCH', 'PUT'].includes(method) && init.body) {
+                if (!(init.headers['Content-Type'] || init.headers['content-type'])) {
+                    init.headers['Content-Type'] = 'application/json';
+                }
+            }
             
             return fetch(input, init);
         };
