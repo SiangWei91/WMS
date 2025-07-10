@@ -11,6 +11,8 @@
     <link rel="stylesheet" href="css/style.css" />
     <link rel="stylesheet" href="css/publicwarehouse.css" />
     <link rel="stylesheet" href="css/shipment.css" />
+    <!-- PapaParse CSV Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
   </head>
   <body>
     <div class="app-container">
@@ -97,11 +99,13 @@
               </div>
               <div id="avatar-dropdown" class="avatar-dropdown">
                 <a href="#" id="dropdown-logout-button">Logout</a>
-                 <a href="#" id="dropdown-clear-supabase-button">Clear Supabase Data (Admin)</a> 
+                <a href="#" id="dropdown-clear-supabase-button">Clear Supabase Data (Admin)</a>
+                <a href="#" id="dropdown-import-csv-button">Import Initial Inventory (CSV)</a>
               </div>
             </div>
           </div>
         </header>
+        <input type="file" id="csv-file-input" accept=".csv" style="display: none;" />
 
         <!-- 页面内容动态加载到这里 -->
         <div class="content" id="content">
